@@ -1,0 +1,312 @@
+---
+title: "_00_by_region"
+author: "Julian Kleindiek"
+date: "7/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load packages
+library(tidyverse)
+library(kableExtra)
+library(janitor)
+library(maps)
+library(geosphere)
+library(data.table)
+library(forecast)
+library(tseries)
+library(fpp)
+library(TSA)
+
+# set paths
+path = "/Users/juliankleindiek/Desktop/UChicago/08_Quarter4/02_TimeSeries/Project"
+filename = "_01_International_Report_Passengers.csv"
+```
+
+
+### Step 1. Read in data
+```{r}
+# set working directory
+setwd(path)
+
+# read in flight data 
+df = fread(file.path(filename))
+
+# save df as tibble
+df = as_tibble(df)
+
+# print available columns
+names(df)
+
+# head
+head(df)
+```
+
+### Step 2. Data cleaning
+```{r}
+# to numeric
+df$total = as.numeric(gsub(",", "", df$total))
+df$scheduled = as.numeric(gsub(",", "", df$scheduled))
+```
+
+
+### Step 3. Data visualization
+```{r}
+# define regions
+south_europe = c("PORTUGAL", "SPAIN", "MALTA", "CYPRUS", "FRANCE", "ITALY", "CROATIA", "GREECE")
+southeast_asia = c("INDONESIA", "THAILAND", "MALAYSIA", "PHILIPPINES", "CAMBODIA") # "VIETNAM", "SINGAPUR", "LAOS"
+south_america = c("BRAZIL", "ARGENTINA", "COLOMBIA", "PERU", "CHILE", "ECUADOR", "BOLIVIA")
+oceania = c("AUSTRALIA", "NEW ZEALAND")
+```
+
+```{r}
+# filter dat by given regions
+df_south_europe = df %>% filter(fg_country %in% south_europe)
+df_southeast_asia = df %>% filter(fg_country %in% southeast_asia)
+df_south_america = df %>% filter(fg_country %in% south_america)
+df_oceania = df %>% filter(fg_country %in% oceania)
+```
+
+```{r}
+# aggregate by year
+df_south_europe_y = aggregate(df_south_europe$total, by=list(cat1=df_south_europe$year), FUN=sum)
+df_southeast_asia_y = aggregate(df_southeast_asia$total, by=list(cat1=df_southeast_asia$year), FUN=sum)
+df_south_america_y= aggregate(df_south_america$total, by=list(cat1=df_south_america$year), FUN=sum)
+df_oceania_y = aggregate(df_oceania$total, by=list(cat1=df_oceania$year), FUN=sum)
+
+# create time series object
+south_europe_ts_y = ts(df_south_europe_y$x, start=1990, end=2019, frequency = 1)
+southeast_asia_ts_y = ts(df_southeast_asia_y$x, start=1990, end=2019, frequency = 1)
+south_america_ts_y = ts(df_south_america_y$x, start=1990, end=2019, frequency = 1)
+oceania_ts_y = ts(df_oceania_y$x, start=1990, end=2019, frequency = 1)
+
+# plot
+ts.plot(south_europe_ts_y, southeast_asia_ts_y, south_america_ts_y, oceania_ts_y,
+        ylab="Number of passengers", xlab="Time", col=c("blue", "red", "green", "yellow"),
+        main="International travel from the US by year")
+legend("topleft", lty=c(1,1,1,1), col=c("blue", "red", "green", "yellow"),
+       legend=c("South Europe", "Southeast Asia", "South America", "Oceania"))
+```
+\
+- Note that 2019 data is not complete\
+
+
+```{r}
+# aggregate by month
+df_south_europe_m = aggregate(df_south_europe$total, by=list(cat1=df_south_europe$year, 
+                                                             cat2=df_south_europe$month), FUN=sum)
+df_southeast_asia_m = aggregate(df_southeast_asia$total, by=list(cat1=df_southeast_asia$year, 
+                                                             cat2=df_southeast_asia$month), FUN=sum)
+df_south_america_m = aggregate(df_south_america$total, by=list(cat1=df_south_america$year, 
+                                                             cat2=df_south_america$month), FUN=sum)
+df_oceania_m = aggregate(df_oceania$total, by=list(cat1=df_oceania$year, 
+                                                             cat2=df_oceania$month), FUN=sum)
+
+# create time series object
+south_europe_ts_m = ts(df_south_europe_m[order(df_south_europe_m$cat1),]$x, frequency = 12, start=c(1990,1))
+southeast_asia_ts_m = ts(df_southeast_asia_m[order(df_southeast_asia_m$cat1),]$x, frequency = 12, start=c(1990,1))
+south_america_ts_m = ts(df_south_america_m[order(df_south_america_m$cat1),]$x, frequency = 12, start=c(1990,1))
+oceania_ts_m = ts(df_oceania_m[order(df_oceania_m$cat1),]$x, frequency = 12, start=c(1990,1))
+
+# plot
+ts.plot(south_europe_ts_m, southeast_asia_ts_m, south_america_ts_m, oceania_ts_m,
+        ylab="Number of passengers", xlab="Time", col=c("blue", "red", "green", "yellow"),
+        main="International travel from the US by month")
+legend("topleft", lty=c(1,1,1,1), col=c("blue", "red", "green", "yellow"),
+       legend=c("South Europe", "Southeast Asia", "South America", "Oceania"))
+```
+
+
+### Step 4. Data modeling
+#### South Europe Monthly
+```{r}
+# plot the data
+tsdisplay(south_europe_ts_m, main="Monthly passenger travel from the US to South Europe")
+```
+\
+- The data is non-stationary having a positive trend\
+- Further, it follows a seasonal pattern with a non-constant variance over time\
+
+```{r}
+# plot with box-cox transformation
+lambda = BoxCox.lambda(south_europe_ts_m)
+south_europe_ts_m_trans = BoxCox(south_europe_ts_m, lambda=lambda)
+tsdisplay(south_europe_ts_m_trans)
+```
+\
+- The Box-Cox transformation leads to a more constant variance over time\
+
+```{r}
+# test for stationarity of training data with KPSS test
+kpss.test(south_europe_ts_m, null="Level")
+```
+\
+- The null hypothesis for the KPSS test is that the data is stationary\
+- Large p-values are indicative of stationarity and small p-values suggest non-stationarity\
+- For this data, the p-value is 0.01 and hence the data is non-stationary at a 5% significance level\
+
+```{r}
+# deseasonalize data
+south_europe_ts_m_deseasonal = diff(south_europe_ts_m, lag=12)
+
+# plot results
+tsdisplay(south_europe_ts_m_deseasonal)
+```
+\
+- After deseasonalizing the data, we can observe no seasonality in the data anymore\
+- In the PACF, there is a cutoff at lag 1 and at lag 12 allowing to draw the conclusion that p and P could both be 1\
+- The ACF is now decaying, which it wasn’t prior to the seasonal differencing and which is a good sign\
+
+```{r}
+# select test and training data
+train = window(south_europe_ts_m, c(2008,1), c(2018,6))
+test = window(south_europe_ts_m, c(2018,7))
+```
+
+```{r}
+# fit auto.arima() model
+model_1 = auto.arima(train, stationary=FALSE, seasonal=TRUE)
+
+# summary
+summary(model_1)
+```
+
+```{r}
+# investigate residuals
+checkresiduals(model_1)
+```
+\
+- The residuals for the plots of both models appear to be white noise\
+- However, based on the Ljung-Box test, we cannot accept the null hypothesis of the data to be independent  since the p-value < 0.05\
+
+#### South America Monthly
+```{r}
+# plot the data
+tsdisplay(south_america_ts_m, main="Monthly passenger travel from the US to South America")
+```
+\
+- The data is non-stationary having a positive trend\
+- Further, it follows a seasonal pattern with a non-constant variance over time\
+
+```{r}
+# plot with box-cox transformation
+lambda_2 = BoxCox.lambda(south_america_ts_m)
+south_america_ts_m_trans = BoxCox(south_america_ts_m, lambda=lambda_2)
+tsdisplay(south_america_ts_m_trans)
+```
+\
+- The Box-Cox transformation leads to a more constant variance over time\
+
+```{r}
+# test for stationarity of training data with KPSS test
+kpss.test(south_america_ts_m, null="Level")
+```
+\
+- The null hypothesis for the KPSS test is that the data is stationary\
+- Large p-values are indicative of stationarity and small p-values suggest non-stationarity\
+- For this data, the p-value is 0.01 and hence the data is non-stationary at a 5% significance level\
+
+```{r}
+# deseasonalize data
+south_america_ts_m_deseasonal = diff(south_america_ts_m, lag=12)
+
+# plot results
+tsdisplay(south_america_ts_m_deseasonal)
+```
+\
+- After deseasonalizing the data, we can observe no seasonality in the data anymore\
+- In the PACF, there is a cutoff at lag 1 and at lag 12 allowing to draw the conclusion that p and P could both be 1\
+- The ACF is now decaying, which it wasn’t prior to the seasonal differencing and which is a good sign\
+
+```{r}
+# select test and training data
+train_2 = window(south_america_ts_m, c(2008,1), c(2018,6))
+test_2 = window(south_america_ts_m, c(2018,7))
+```
+
+```{r}
+# fit auto.arima() model
+model_2 = auto.arima(train_2, stationary=FALSE, seasonal=TRUE)
+
+# summary
+summary(model_2)
+```
+
+```{r}
+# investigate residuals
+checkresiduals(model_2)
+```
+\
+- The residuals for the plots of both models appear to be white noise\
+- Based on the Ljung-Box test, we can accept the null hypothesis of the data to be independent  since the p-value > 0.05\
+
+
+
+### Step 5. Forecasting
+#### South Europe Monthly
+```{r}
+# forecast the year 1980
+h = 12
+fc_1 = forecast(model_1, h=h)
+
+# plot test data and forecasts of both models
+autoplot(test, xlab = "Time", ylab = "Number of passengers",
+         main="12-month forecast for South Europe Monthly with auto arima model", series="Test data") +
+  autolayer(fc_1$mean, series="Forecast model_1")
+```
+
+```{r}
+# accuracy of model_1
+accuracy(fc_1, test)
+```
+
+```{r}
+# forecast into the future
+fc_2 = forecast(model_1, h=24, level=c(80, 95))
+
+# plot the forecast
+plot(fc_2, main="24-month forecast for South Europe Monthly with auto arima model")
+```
+
+#### South America Monthly
+```{r}
+# forecast the year 1980
+h = 12
+fc_3 = forecast(model_2, h=h)
+
+# plot test data and forecasts of both models
+autoplot(test_2, xlab = "Time", ylab = "Number of passengers",
+         main="12-month forecast for South America Monthly with auto arima model", series="Test data") +
+  autolayer(fc_3$mean, series="Forecast model_3")
+```
+
+```{r}
+# accuracy of model_1
+accuracy(fc_3, test)
+```
+
+```{r}
+# forecast into the future
+fc_4 = forecast(model_2, h=24, level=c(80, 95))
+
+# plot the forecast
+plot(fc_4, main="24-month forecast for South America Monthly with auto arima model")
+```
+
+
+
+
+
+
+
+### Open Questions:
+- I still have a pattern in my residuals because of a second/offset seasonality; how can I integrate that into my model?
+
+
+
+
+
+
+
