@@ -19,6 +19,7 @@ library(forecast)
 library(tseries)
 library(fpp)
 library(TSA)
+library(jsonlite)
 
 # set paths
 path = "/Users/juliankleindiek/Desktop/UChicago/08_Quarter4/02_TimeSeries/Project"
@@ -240,7 +241,7 @@ checkresiduals(model_2)
 ```
 \
 - The residuals for the plots of both models appear to be white noise\
-- Based on the Ljung-Box test, we can accept the null hypothesis of the data to be independent  since the p-value > 0.05\
+- Based on the Ljung-Box test, we can accept the null hypothesis of the data to be independent since the p-value > 0.05\
 
 
 
@@ -269,6 +270,9 @@ fc_2 = forecast(model_1, h=24, level=c(80, 95))
 # plot the forecast
 plot(fc_2, main="24-month forecast for South Europe Monthly with auto arima model")
 ```
+\
+- In this plot we can observe the multiple seasonality in the data for South Europe
+
 
 #### South America Monthly
 ```{r}
@@ -283,7 +287,7 @@ autoplot(test_2, xlab = "Time", ylab = "Number of passengers",
 ```
 
 ```{r}
-# accuracy of model_1
+# accuracy of model_3
 accuracy(fc_3, test)
 ```
 
@@ -295,14 +299,133 @@ fc_4 = forecast(model_2, h=24, level=c(80, 95))
 plot(fc_4, main="24-month forecast for South America Monthly with auto arima model")
 ```
 
+### Step 6. Additional models
+#### Load additional data (cpi index & infaltion)
+```{r}
+# source https://datahub.io/core/cpi-us#r
+json_file = 'https://datahub.io/core/cpi-us/datapackage.json'
+json_data = fromJSON(paste(readLines(json_file), collapse=""))
 
+# get list of all resources:
+print(json_data$resources$name)
 
+# print all tabular data(if exists any)
+for(i in 1:length(json_data$resources$datahub$type)){
+  if(json_data$resources$datahub$type[i]=='derived/csv'){
+    path_to_file = json_data$resources$path[i]
+    dat_cpi = read.csv(url(path_to_file))
+    print(head(dat_cpi))
+  }
+}
 
+# create year column
+dat_cpi["year"] = substr(dat_cpi[,1], start = 1, stop = 4)
 
+# create month column
+dat_cpi["month"] = substr(dat_cpi[,1], start = 6, stop = 7)
 
+# adjust type
+dat_cpi["month"] = as.numeric(unlist(dat_cpi["month"]))
+dat_cpi["year"] = as.numeric(unlist(dat_cpi["year"]))
 
-### Open Questions:
-- I still have a pattern in my residuals because of a second/offset seasonality; how can I integrate that into my model?
+# impute mean for nas in cpi and inflation
+dat_cpi[is.na(dat_cpi[,2]), 2] <- mean(dat_cpi[,2], na.rm = TRUE)
+dat_cpi[is.na(dat_cpi[,3]), 3] <- mean(dat_cpi[,3], na.rm = TRUE)
+
+# create ts object for cpi
+cpi_ts = ts(dat_cpi["Index"], frequency = 12, start=c(1990,1), end=c(2019,6))
+
+# create ts object for inflation
+infl_ts = ts(dat_cpi["Inflation"], frequency = 12, start=c(1990,1), end=c(2019,6))
+```
+
+#### Build VAR model on South Erurope data 
+```{r}
+# select test and training data
+train_travel = window(south_europe_ts_m, c(2008,1), c(2018,6))
+test_travel = window(south_europe_ts_m, c(2018,7))
+train_cpi = window(cpi_ts, c(2008,1), c(2018,6))
+test_cpi = window(cpi_ts, c(2018,7))
+
+# var order selection for number of passengers
+VARselect(cbind(south_europe_ts_m, cpi_ts), lag.max = 15, type = "const")$selection
+
+# build model
+var_1 = VAR(cbind(train_travel, train_cpi), p=4, type="both", season=12)
+var_2 = VAR(cbind(train_travel, train_cpi), p=13, type="both", season=12)
+
+# forecast
+h = 12
+fc_5 = forecast(var_1, h=h)
+fc_6 = forecast(var_2, h=h)
+```
+\
+- Based on the AIC, the VAR(13) should be selected\
+
+```{r}
+# test serial correlation in the residuals
+serial.test(var_2, lags.pt = 10, type = "PT.asymptotic")
+
+# plot acf of residuals
+varresids = residuals(var_2)
+acf(varresids[,1], main="Residuals Number Passengers")
+acf(varresids[,2], main="Residuals CPI")
+
+# test serial correlation in the residuals
+serial.test(var_1, lags.pt = 10, type = "PT.asymptotic")
+
+# plot acf of residuals
+varresids = residuals(var_1)
+acf(varresids[,1], main="Residuals Number Passengers")
+acf(varresids[,2], main="Residuals CPI")
+```
+\
+- The null hypothesis of the serial.test is that there is no serial correlation in the residuals\
+- For a VAR(13) model, the null hypothesis of the serial.test is rejected\
+- The ACF for the residuals of the number of passengers also shows that there is some pattern in the residuals\
+- A VAR(4) model results in the ability to not reject the null hypothesis for residuals with serial correlation with a p-value > 0.05, but the ACF plot still suggest some pattern in the residuals\
+
+```{r}
+# plot test data and forecasts 
+autoplot(test_travel, xlab = "Time", ylab = "Number of passengers",
+         main="12-month forecast for South Europe Monthly with VAR(4) model", series="Test data") +
+  autolayer(fc_5$forecast$train_travel$mean, series="Forecast VAR(4) model")
+
+# accuracy of var model
+accuracy(fc_5$forecast$train_travel, test)
+```
+
+#### Build model on South Europe data considering multiple seasonality
+```{r}
+# fit tbats model
+model_4 = tbats(train)
+
+# summary
+summary(model_4)
+
+# investigate residuals
+checkresiduals(model_4)
+```
+
+```{r}
+# fit auto.arima model with fourier
+model_5 = auto.arima(train, xreg=fourier(train, K=5), seasonal=FALSE)
+
+# summary
+summary(model_5)
+
+# investigate residuals
+checkresiduals(model_5)
+
+# forecast into the future
+fc_7 = forecast(model_5, xreg = fourier(train, K=5, h=24), level=c(80, 95))
+
+# plot the forecast
+plot(fc_7, main="24-month forecast for South Europe Monthly with auto arima model with fourier term")
+```
+\
+- Compared to model_1, the p-value for the Ljung-Box test is higher, meaning that the model is better in capturing the patterns in the residuals, but it is not capturing it sufficiently well since we can still not accept the null hypothesis of uncorrelated residuals\
+
 
 
 
