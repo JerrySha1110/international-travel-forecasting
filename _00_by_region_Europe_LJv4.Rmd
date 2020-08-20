@@ -199,6 +199,7 @@ Forecasts
 - Holt Winters
 - Simple Exponential Smoothing
 - ETS()
+- TBATS()
 
 ```{r}
 
@@ -748,6 +749,35 @@ ets_f8 %>% forecast(h=length(test)) %>%
 ```
 
 This is the best ETS() model we have, ETS (M,A,M) - Damped
+
+
+### TBATS()
+
+```{r}
+# fit tbats
+tbats_fit <- tbats(train)
+
+# forecast
+tbats_fc <- forecast(tbats_fit, h =length(test)) 
+
+# plot and summarize the forecast
+autoplot(tbats_fc) + ggtitle("TBATS Forecast - TBATS(0.001, {0,0}, -, {<12,5>})")
+summary(tbats_fc)
+
+# check residuals
+checkresiduals(tbats_fc)
+
+# check accuracy
+accuracy(tbats_fc, test)
+#                    ME      RMSE      MAE       MPE     MAPE      MASE        ACF1 Theil's U
+# Training set  6172.75  37654.02 26146.16 0.3534106 2.447341 0.4208982 -0.04514903        NA
+# Test set     63821.39 100214.35 67404.42 3.9672241 4.141832 1.0850697  0.49269555 0.3172993
+
+# Forecast method: TBATS(0.001, {0,0}, -, {<12,5>})
+```
+
+
+
 
 ###  End Lola's Section 
 
