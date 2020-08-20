@@ -169,7 +169,7 @@ south_europe_ts_m_deseasonal = diff(diff(south_europe_ts_m, lag=12), lag=1)
 tsdisplay(south_europe_ts_m_deseasonal, main="ACF and PACF with seasonal and non-seasonal differencing")
 ```
 \
-- After deseasonalizing the data, we can observe no seasonality in the data anymore\
+- After deseasonalizing and detrending the data, we can observe no seasonality in the data anymore\
 - In the PACF, there is a cutoff at lag 12 and 24 (P could be 1 or 2)\
 - The ACF cutoff at lag 12 (Q could be 1)\
 
