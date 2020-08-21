@@ -191,15 +191,15 @@ test = window(south_europe_ts_m, c(2018,7))
 
 ###  Start Lola's Section 
 
-Forecasts
-- Average 
-- Naive 
-- Seasonal Naive
-- Random Walk w/ Drift
-- Holt Winters
-- Simple Exponential Smoothing
-- ETS()
-- TBATS()
+  Forecasts
+  - Average 
+  - Naive 
+  - Seasonal Naive
+  - Random Walk w/ Drift
+  - Holt Winters
+  - Simple Exponential Smoothing
+  - ETS()
+  - TBATS()
 
 ```{r}
 
@@ -260,6 +260,14 @@ kpss.test(boxcox_data, null = "Level") # p-value is > 0.058 which is just barely
 
 ```
 
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(scales)
+
+```
 
 
 
@@ -281,6 +289,8 @@ accuracy(avg_fc, test)
 #                       ME     RMSE      MAE       MPE     MAPE     MASE    
 # Training set -8.123646e-11 332825.3 279369.3 -10.77332 29.71691 4.497258 
 # Test set      4.678687e+05 637974.2 516031.6  23.90382 29.43255 8.307026 
+
+
 ```
 
 Average Forecast = Poor performance
@@ -819,6 +829,37 @@ accuracy(tbats_fc, test)
 
 ```
 
+```{r}
+glimpse(train)
+plot(train)
+
+train_plot<- data.frame(train, date = index(train))
+
+avg_plot<- data.frame(avg_plot, date = index(avg_plot))
+
+glimpse(train_plot)
+
+
+ggplot(train_plot, aes(x = date, y = train), + geom_line(color = "black") +
+  autolayer(avg_fc$mean)  +
+  autolayer(naive_fc$mean) +
+  autolayer(snaive_fc$mean) +
+  autolayer(rwf_fc$mean) +
+  autolayer(hw_fc$mean) +
+  autolayer(ses_fc$mean) +
+  autolayer(ets_auto_fc$mean) +
+  autolayer(ets_f8$mean) +
+  autolayer(tbats_fc$mean)
+  
+
+
+
+train_plot
+
+ggplot(train_plot, aes(x=date, y=train))+
+  geom_smooth(data=avg_fc$mean,aes(color="GO1"),se = FALSE,span = 0.3)+
+  geom_smooth(data=naive_fc$mean,aes(color="GO2"),se = FALSE,span = 0.3)
+```
 
 
 ###  End Lola's Section 
