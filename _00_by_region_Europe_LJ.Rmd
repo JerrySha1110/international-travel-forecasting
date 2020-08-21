@@ -831,34 +831,22 @@ accuracy(tbats_fc, test)
 
 ```{r}
 glimpse(train)
-plot(train)
-
 train_plot<- data.frame(train, date = index(train))
-
-avg_plot<- data.frame(avg_plot, date = index(avg_plot))
-
 glimpse(train_plot)
 
 
-ggplot(train_plot, aes(x = date, y = train), + geom_line(color = "black") +
-  autolayer(avg_fc$mean)  +
-  autolayer(naive_fc$mean) +
-  autolayer(snaive_fc$mean) +
-  autolayer(rwf_fc$mean) +
-  autolayer(hw_fc$mean) +
-  autolayer(ses_fc$mean) +
-  autolayer(ets_auto_fc$mean) +
-  autolayer(ets_f8$mean) +
-  autolayer(tbats_fc$mean)
+ggplot(train_plot, aes(x = date, y = train)) + geom_line(color = "black") +
+  autolayer(avg_fc$mean, series = "average")  +
+  autolayer(naive_fc$mean, series = "naive") +
+  autolayer(snaive_fc$mean, series = "snaive") +
+  autolayer(rwf_fc$mean, series = "rw w/ drift") +
+  autolayer(hw_fc$mean, series = "holt winters") +
+  autolayer(ses_fc$mean, series = "ses") +
+  autolayer(ets_auto_fc$mean, series = "ets") +
+  autolayer(ets_f8$mean, series = "ets damped") +
+  autolayer(tbats_fc$mean, series = "tbats")+
+  ggtitle("Forecast Comparison")
   
-
-
-
-train_plot
-
-ggplot(train_plot, aes(x=date, y=train))+
-  geom_smooth(data=avg_fc$mean,aes(color="GO1"),se = FALSE,span = 0.3)+
-  geom_smooth(data=naive_fc$mean,aes(color="GO2"),se = FALSE,span = 0.3)
 ```
 
 
