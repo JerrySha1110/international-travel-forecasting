@@ -797,8 +797,75 @@ This is the best ETS() model we have, ETS (M,A,M) - Damped
 ```{r}
 accuracy(ets_f8, test)
 summary(ets_f8)
+
+
+
+
+
 ```
 
+
+#### Cool interactive visual forecasts
+
+```{r}
+
+library(forecast)
+library(dygraphs)
+
+ets_f8 %>% forecast(h=length(test))  %>%
+  {cbind(actuals=.$x, forecast_mean=.$mean)} %>%
+  dygraph()
+
+
+ets_f8 %>% forecast(h=length(test))  %>%
+  {cbind(actuals=ets_f8$x, forecast_mean=ets_f8$mean,
+         lower_95=ets_f8$lower[,"95%"], upper_95=ets_f8$upper[,"95%"],
+         lower_80=ets_f8$lower[,"80%"], upper_80=ets_f8$upper[,"80%"])} %>%
+  dygraph() %>%
+  dySeries("actuals", color = "black") %>%
+  dySeries(c("lower_80", "forecast_mean", "upper_80"),
+           label = "80%", color = "blue") %>%
+  dySeries(c("lower_95", "forecast_mean", "upper_95"),
+           label = "95%", color = "blue")
+
+```
+```{r}
+
+# coo
+
+interval_value_formatter <- "function(num, opts, seriesName, g, row, col) {
+  value = g.getValue(row, col);
+  if(value[0] != value[2]) {
+    lower = Dygraph.numberValueFormatter(value[0], opts);
+    upper = Dygraph.numberValueFormatter(value[2], opts);
+    return '[' + lower + ', ' + upper + ']';
+  } else {
+    return Dygraph.numberValueFormatter(num, opts);
+  }
+}"
+
+ets_f8 %>% 
+  forecast(h=length(test))  %>%
+  {cbind(actuals=.$x, forecast_mean=.$mean,
+        lower_95=.$lower[,"95%"], upper_95=.$upper[,"95%"],
+        lower_80=.$lower[,"80%"], upper_80=.$upper[,"80%"])} %>%
+  dygraph(main="ETS(M,Ad,M) Damped Forecast ", ylab = "Monthly Passengers") %>%
+  dyAxis("y", valueFormatter = interval_value_formatter, drawGrid = FALSE) %>%
+  dySeries("actuals", color = "black") %>%
+  dySeries("forecast_mean", color = "blue", label = "forecast") %>%
+  dySeries(c("lower_80", "forecast_mean", "upper_80"),
+           label = "80%", color = "blue") %>%
+  dySeries(c("lower_95", "forecast_mean", "upper_95"),
+           label = "95%", color = "blue") %>%
+  dyLegend(labelsSeparateLines=TRUE) %>%
+  dyRangeSelector() %>%
+  dyOptions(digitsAfterDecimal = 1) %>%
+  dyCSS(textConnection(".dygraph-legend {background-color: rgba(255, 255, 255, 0.5) !important; }"))
+
+
+
+
+```
 
 ### TBATS()
 
@@ -826,7 +893,22 @@ accuracy(tbats_fc, test)
 ```
 
 ```{r}
-
+tbats_fc  %>%
+  {cbind(actuals=.$x, forecast_mean=.$mean,
+        lower_95=.$lower[,"95%"], upper_95=.$upper[,"95%"],
+        lower_80=.$lower[,"80%"], upper_80=.$upper[,"80%"])} %>%
+  dygraph(main="TBATS Forecast", ylab = "Monthly Passengers") %>%
+  dyAxis("y", valueFormatter = interval_value_formatter, drawGrid = FALSE) %>%
+  dySeries("actuals", color = "black") %>%
+  dySeries("forecast_mean", color = "blue", label = "forecast") %>%
+  dySeries(c("lower_80", "forecast_mean", "upper_80"),
+           label = "80%", color = "blue") %>%
+  dySeries(c("lower_95", "forecast_mean", "upper_95"),
+           label = "95%", color = "blue") %>%
+  dyLegend(labelsSeparateLines=TRUE) %>%
+  dyRangeSelector() %>%
+  dyOptions(digitsAfterDecimal = 1) %>%
+  dyCSS(textConnection(".dygraph-legend {background-color: rgba(255, 255, 255, 0.5) !important; }"))
 ```
 
 ```{r}
@@ -834,8 +916,9 @@ glimpse(train)
 train_plot<- data.frame(train, date = index(train))
 glimpse(train_plot)
 
+test
 
-ggplot(train_plot, aes(x = date, y = train)) + geom_line(color = "black") +
+ggplot(train_plot, aes(x = date, y = train)) + geom_line(color = "black")  +
   autolayer(avg_fc$mean, series = "average")  +
   autolayer(naive_fc$mean, series = "naive") +
   autolayer(snaive_fc$mean, series = "snaive") +
