@@ -516,7 +516,7 @@ accuracy(ses_2, diff_data_2)
 
 ```
 
-Looks like this model is overfit.
+** Test error is lower than train error, which is weird. Maybe we need to change the train/test split? Since right now we only have 1 year of test data maybe its easier to predict than the train? talk to group about this**
 
 
 #### ETS() 
@@ -830,8 +830,7 @@ ets_f8 %>% forecast(h=length(test))  %>%
 
 ```
 ```{r}
-
-# coo
+# cool interactive forecast
 
 interval_value_formatter <- "function(num, opts, seriesName, g, row, col) {
   value = g.getValue(row, col);
