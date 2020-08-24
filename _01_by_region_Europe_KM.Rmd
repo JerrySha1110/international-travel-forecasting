@@ -1,0 +1,1150 @@
+---
+title: "International Flight Forecasting"
+author: "Team 5"
+date: "8/26/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{css, echo=FALSE}
+pre, code {white-space:pre !important; overflow-x:auto}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+
+# clear working environment
+rm(list = ls())
+
+# load packages
+library(tidyverse)
+library(kableExtra)
+library(janitor)
+library(maps)
+library(geosphere)
+library(data.table)
+library(forecast)
+library(tseries)
+library(fpp)
+library(TSA)
+library(jsonlite)
+library(vars)
+library(summarytools)
+
+# common functions
+
+# 1.) formatted cross tabulations
+tablist <- function(x, ...) {
+  x %>%
+     group_by(...) %>%
+     summarize(`_freq` = n()) %>%
+     arrange(...) %>%
+     as.data.frame() %>%
+     pander::pandoc.table(split.tables = Inf, multi.line = TRUE)}
+
+# 2.) formatted output tables
+mykable <- function(x, ...) {
+  kable(x, ...) %>% kable_styling(bootstrap_options = c("responsive", "consensed", "hover", "striped"))
+}
+   
+
+# set paths
+path = "C:/Users/KMonzella/OneDrive - Mathematica/Desktop/MScA Program Work/Time Series Analysis and Forecasting/Final project/Shiny app"
+filename = "_01_International_Report_Passengers.csv"
+
+
+```
+library(viridis)
+library(ggplot2)
+
+### Step 1. Read in data and check structure{.tabset}
+```{r}
+
+# set working directory
+setwd(path)
+
+# read in flight data 
+df = fread(file.path(filename))
+
+# save df as tibble
+df = as_tibble(df)
+```
+
+#### Print rows
+```{r, results='asis'}
+# head
+mykable(head(df))
+
+```
+
+#### Check structure
+```{r, results='asis'}
+# Describe data
+print(dfSummary(df, 
+                plain.ascii  = FALSE, 
+                style        = "grid", 
+                graph.magnif = .75, 
+                valid.col    = FALSE,
+                varnumbers   = FALSE,
+                tmp.img.dir  = "/tmp"), method = 'render')
+```
+
+
+
+### Step 2. Data cleaning
+* In this step, we created numeric versions of previously character variable to be used in analyses. Updated variables include:  
+  + Total number of passengers
+  + <p style="color:red"> what does scheduled mean?? </p>
+```{r step2, echo=TRUE}
+
+# to numeric
+df$total     = as.numeric(gsub(",", "", df$total))
+df$scheduled = as.numeric(gsub(",", "", df$scheduled))
+
+```
+
+
+
+### Step 3. Defining regions{.tabset}
+* In this step, we defined regions for analyses, including southern Europe, Southeast Asia, South America, and Oceania. The countries included in each region are tabulated below. 
+```{r, results='asis'}
+
+# define regions
+south_europe   = c("PORTUGAL",  "SPAIN",      "MALTA",    "CYPRUS",      "FRANCE",   "ITALY",   "CROATIA", "GREECE")
+southeast_asia = c("INDONESIA", "THAILAND",   "MALAYSIA", "PHILIPPINES", "CAMBODIA") # "VIETNAM", "SINGAPUR", "LAOS"
+south_america  = c("BRAZIL",    "ARGENTINA",  "COLOMBIA", "PERU",        "CHILE",    "ECUADOR", "BOLIVIA")
+oceania        = c("AUSTRALIA", "NEW ZEALAND")
+
+# filter dat by given regions
+df_south_europe   = df %>% filter(toupper(fg_country) %in% south_europe)
+df_southeast_asia = df %>% filter(toupper(fg_country) %in% southeast_asia)
+df_south_america  = df %>% filter(toupper(fg_country) %in% south_america)
+df_oceania        = df %>% filter(toupper(fg_country) %in% oceania)
+
+# check region limitations
+```
+
+#### South Europe
+```{r, results = 'asis'}
+mykable(tablist(df_south_europe, fg_country))
+```
+
+#### Southest Asia
+```{r, results = 'asis'}
+mykable(tablist(df_southeast_asia, fg_country))
+```
+
+#### South America
+```{r, results = 'asis'}
+mykable(tablist(df_south_america, fg_country))
+```
+
+#### Oceania
+```{r, results = 'asis'}
+mykable(tablist(df_oceania, fg_country))
+```
+
+
+### Step 4. Data aggregation{.tabset}
+#### By year
++ Below, we aggregate the data to the annual level and plot each region. Note that the 2019 data are not complete, which is why we see a notable drop in total passengers in 2019.
+```{r}
+
+df_south_europe_y   = aggregate(df_south_europe$total,   by=list(cat1=df_south_europe$year),   FUN=sum)
+df_southeast_asia_y = aggregate(df_southeast_asia$total, by=list(cat1=df_southeast_asia$year), FUN=sum)
+df_south_america_y  = aggregate(df_south_america$total,  by=list(cat1=df_south_america$year),  FUN=sum)
+df_oceania_y        = aggregate(df_oceania$total,        by=list(cat1=df_oceania$year),        FUN=sum)
+
+# create time series object
+south_europe_ts_y   = ts(df_south_europe_y$x,   start=1990, end=2019, frequency = 1)
+southeast_asia_ts_y = ts(df_southeast_asia_y$x, start=1990, end=2019, frequency = 1)
+south_america_ts_y  = ts(df_south_america_y$x,  start=1990, end=2019, frequency = 1)
+oceania_ts_y        = ts(df_oceania_y$x,        start=1990, end=2019, frequency = 1)
+
+# plot
+ts.plot(south_europe_ts_y, southeast_asia_ts_y, south_america_ts_y, oceania_ts_y,
+        ylab="Number of passengers", 
+        xlab="Time", 
+        col=c("blue", "red", "green", "yellow"),
+        main="International travel from the US by year")
+
+legend("topleft", 
+       lty=c(1,1,1,1), 
+       col=c("blue", "red", "green", "yellow"),
+       legend=c("South Europe", "Southeast Asia", "South America", "Oceania"))
+```
+
+
+#### By month and year
++ Below, we aggregate the data to the monthly level and plot.
+```{r}
+# aggregate by month
+df_south_europe_m   = aggregate(df_south_europe$total,    by=list(cat1=df_south_europe$year, 
+                                                                  cat2=df_south_europe$month),   FUN=sum)
+df_southeast_asia_m = aggregate(df_southeast_asia$total,  by=list(cat1=df_southeast_asia$year, 
+                                                                  cat2=df_southeast_asia$month), FUN=sum)
+df_south_america_m  = aggregate(df_south_america$total,   by=list(cat1=df_south_america$year, 
+                                                                  cat2=df_south_america$month),  FUN=sum)
+df_oceania_m        = aggregate(df_oceania$total,         by=list(cat1=df_oceania$year, 
+                                                                  cat2=df_oceania$month),        FUN=sum)
+
+# save RDS for Shiny app
+saveRDS(df_south_europe, file = "southeurope_input.rds")
+
+# create time series object
+south_europe_ts_m   = ts(df_south_europe_m[order(df_south_europe_m$cat1),]$x,     frequency = 12, start=c(1990,1))
+southeast_asia_ts_m = ts(df_southeast_asia_m[order(df_southeast_asia_m$cat1),]$x, frequency = 12, start=c(1990,1))
+south_america_ts_m  = ts(df_south_america_m[order(df_south_america_m$cat1),]$x,   frequency = 12, start=c(1990,1))
+oceania_ts_m        = ts(df_oceania_m[order(df_oceania_m$cat1),]$x,               frequency = 12, start=c(1990,1))
+
+# plot
+ts.plot(south_europe_ts_m, southeast_asia_ts_m, south_america_ts_m, oceania_ts_m,
+        ylab="Number of passengers", 
+        xlab="Time", 
+        col=c("blue", "red", "green", "yellow"),
+        main="International travel from the US by month")
+
+legend("topleft", 
+       lty=c(1,1,1,1), 
+       col=c("blue", "red", "green", "yellow"),
+       legend=c("South Europe", "Southeast Asia", "South America", "Oceania"))
+```
+
+
+### Step 5. Pre-processing and insights{.tabset}
+#### ACF/PACF  
++ The data is non-stationary having a positive trend.  
++ Further, it follows a seasonal pattern with a non-constant variance over time.  
+```{r}
+# ACF and PACF for data
+tsdisplay(south_europe_ts_m, main="Monthly passenger travel from the US to South Europe")
+```
+
+#### Box Cox
++ The Box-Cox transformation leads to a more constant variance over time.  
+```{r}
+# plot with box-cox transformation
+lambda                  = BoxCox.lambda(south_europe_ts_m)
+south_europe_ts_m_trans = BoxCox(south_europe_ts_m, lambda=lambda)
+tsdisplay(south_europe_ts_m_trans)
+```
+
+#### Stationarity  
++ The null hypothesis for the KPSS test is that the data is stationary.  
++ Large p-values are indicative of stationarity and small p-values suggest non-stationarity.  
++ For this data, the p-value is 0.01 and hence the data is non-stationary at a 5% significance level.  
+```{r}
+# test for stationarity of training data with KPSS test
+kpss.test(south_europe_ts_m, null="Level")
+```
+
+#### Seasonal decomposition  
++ The appropriate Holt-Winters method for this data set is multiplicative, because the magnitude of the seasonal pattern increases over time.  
++ The additive Holt-Winters method would be used if the seasonal fluctuation does not change in magnitude over time.  
+
+```{r}
+# decompose data
+fit_multi = decompose(south_europe_ts_m, type="multiplicative")
+
+# plot decomposed data
+plot(fit_multi)
+```
+
+#### Deseasonalizing
++ After deseasonalizing and detrending the data, we can observe no seasonality in the data anymore.  
++ In the PACF, there is a cutoff at lag 12 and 24 (P could be 1 or 2).  
++ The ACF cutoff at lag 12 (Q could be 1).  
+```{r}
+# deseasonalize data
+south_europe_ts_m_deseasonal = diff(diff(south_europe_ts_m, lag=12), lag=1)
+
+# plot results
+tsdisplay(south_europe_ts_m_deseasonal, main="ACF and PACF with seasonal and non-seasonal differencing")
+```
+
+
+### Step 6. Modeling preparation{.tabset}
+#### Addressing stationarity for modeling
+* From our exploration, we found that the data were not stationary. Therefore, we need to correct for stationarity before modeling
+* <p style="color:red"> TEAM: Lola performed this differencing in the data to make it stationary but it doesn't look like we used it in any modeling. Thoughts? Is it enough to just use "stationarity= FALSE"  in models? </p> 
+```{r}
+
+# take seasonal difference to remove seasonality
+diff_data_lag12 <- diff(south_europe_ts_m, lag = 12)
+tsdisplay(diff_data_lag12)
+
+# check for stationarity
+adf.test(diff_data_lag12) 
+kpss.test(diff_data_lag12)
+
+# still not stationary according to KPSS test, so take another difference to remove trend
+diff_data_2 <- diff(diff_data_lag12, lag = 1)
+tsdisplay(diff_data_2)
+
+# check for stationarity
+adf.test(diff_data_2) 
+kpss.test(diff_data_2)
+
+# select test and training data
+train = window(south_europe_ts_m, c(2008,1), c(2018,6))
+test  = window(south_europe_ts_m, c(2018,7))
+
+# select a differenced test and training data
+train_diff = window(diff_data_2,  c(2008,1), c(2018,6))
+test_diff  = window(diff_data_2,  c(2018,7))
+```
+
+
+```{r, include=FALSE, echo=FALSE}
+# prepare for modeling: initializing datasets and function
+
+# Dataframes:
+# initialize dataframe to store accuracy results as we fit and test various model
+
+accuracy_df = data.frame(model_name    = character(),
+                         mae           = numeric(),    # mean absolute error
+                         fore_err      = numeric())    # one year forecast error
+
+
+# Functions:
+# 1.) function to calculate accuracy score
+
+check_accuracy <- function(modelname, quo_modelname, testdf){
+  
+    # forecast horizon error
+    err  = sum(abs(modelname[['mean']]-testdf), na.rm=TRUE)
+    
+    # MAE
+    mae  = mean(abs(modelname[['mean']]-testdf), na.rm=TRUE)
+    
+    # for each forecast value in the horizon, calculate the error
+    m_err  = as.data.frame(abs(modelname[['mean']]-testdf)) %>% mutate(rowvalue= 1, rown = row_number())
+    
+    # reshape values wide so that monthly forecasts are saved as columns, not rows
+    wide = reshape(m_err, timevar = "rown", idvar = "rowvalue", direction = "wide")
+    
+    # bind into dataset
+    df   = data.frame(model_name = quo_modelname,
+                      mae        = mae,
+                      fore_err   = err)
+    
+    # bind wide forecasts for each month. Note that the cbind.fill here is needed because the modelname and fore_err columns are not in the wide df
+    # and the month-specific columns are not in the df dataframe.
+    
+    df   = rowr::cbind.fill(df, wide)
+    
+    # bind with accuracy df from previous models
+    accuracy_df <- bind_rows(accuracy_df, df)
+  
+}
+
+
+# 2.) function to calculate and store accuracy information
+
+# plot test data and forecasts of both models
+plotsumm <- function(modelname, title, testdf){
+  
+  # plot
+  (autoplot(modelname, 
+           xlab = "Time",
+           ylab = "Number of passengers",
+           main = paste("12-month forecast for South Europe with ", title, " model"),
+           series = "Test data")+
+  autolayer(modelname$mean, 
+            series = "Forecast"))
+  
+  # summarize
+  mykable(summary(modelname))
+  
+  # check residuals
+  checkresiduals(modelname)
+  
+  # check accuracy
+  accuracy(modelname, testdf)
+  
+  # store accuracy information
+  accuracy_df  = check_accuracy(modelname, title, testdf) 
+  
+  return(accuracy_df)
+
+}
+
+```
+
+
+
+### Step 7. Modeling{.tabset}
+#### Average 
+* Notes:
+  + Average Forecast = Poor performance
+```{r}
+
+# Average forecast 
+avg_fc <- meanf(train, h=length(test))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df = plotsumm(avg_fc, "Average", test)
+
+
+```
+
+
+#### Naive 
+* Notes:  
+  + Naive forecast uses the last point recorded.
+  + ACF shows that there is seasonality and the residuals are far from white noise.
+  + Terrible performance.
+```{r}
+
+# naive() forecast 
+naive_fc <- naive(train, h=length(test))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df = plotsumm(naive_fc, "Naive", test)
+
+```
+
+
+####  Seasonal Naive Forecast 
+* Notes: 
+  + Seasonal Naive forecast uses previous cycle (last year by month) for predicted values. 
+  + ACF shows exponential decay, slightly better than plain naive forecast however the residuals are still far from white noise. 
+  + Seasonal Naive Forecast = Poor performance.
+```{r}
+# seasonal naive() forecast 
+snaive_fc <- snaive(train, h=length(test))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(snaive_fc, "Seasonal Naive", test)
+```
+
+
+
+#### Holt Winters Forecast 
+* Notes:  
+  + Holt Winters - Performance = Not bad
+  + HoltWinters() uses heuristic values for the initial states and then estimates the smoothing parameters by optimizing the MSE.
+```{r}
+# holt winters forecast
+hw_fc <- forecast(HoltWinters(train), h = length(test))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(hw_fc, "Holt Winters", test)
+```
+
+#### SES 
+* Notes:
+  + We fit two SES models below. First, we fit a regular simple exponential smoothing model. However, SES is suitable for data with no trend or seasonal pattern. Therefore, we see poor performance. Then, we try SES on our differenced data with trend and seasonality removed.
+```{r}
+# simple exponential smoothing
+ses_fc <- ses(train, alpha = .2, h = length(test))
+
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(ses_fc, "SES", test)
+```
+
+
+```{r}
+
+# try SES on stationary data
+
+# simple exponential smoothing, standard starting alpha = 0.2
+ses_fc_diff <- ses(train_diff, alpha = .2, h = length(test_diff))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(ses_fc, "SES - Stationary", test_diff)
+
+
+```
+
+
+```{r}
+# Used the standard 0.2 = alpha, lets try to find the optimal alpha.
+# identify optimal alpha parameter
+alpha <- seq(.01, .99, by = .01)
+RMSE <- NA
+for(i in seq_along(alpha)) {
+  fit <- ses(train_diff, alpha = alpha[i], h = length(test_diff))
+  RMSE[i] <- accuracy(fit, test_diff)[2,2]
+}
+
+# convert to a data frame and idenitify min alpha value
+alpha.fit <- data_frame(alpha, RMSE)
+alpha.min <- filter(alpha.fit, RMSE == min(RMSE))
+
+# plot RMSE vs. alpha
+ggplot(alpha.fit, aes(alpha, RMSE)) +
+  geom_line() +
+  geom_point(data = alpha.min, aes(alpha, RMSE), size = 2, color = "blue")  
+
+alpha.min # 0.78	
+
+```
+
+```{r}
+# refit model with alpha = .0.78
+ses_2 <- ses(train_diff, alpha = 0.78, h = length(test_diff))
+
+# check residuals and one-step forecast errors from the ETS(M,A,M) damped model.
+cbind('Residuals' = residuals(ses_2),
+      'Forecast errors' = residuals(fit,type='response')) %>%
+  autoplot(facet=TRUE) + xlab("Year") + ylab("")
+
+# check residuals
+checkresiduals(ses_2)
+
+ses_2 %>%autoplot(facets = TRUE) + ggtitle("South EU Passengers | 1 YR Forecast | SES alpha 0.78") + ylab("Passengers") + xlab("Time")
+
+# check accuracy
+accuracy(ses_2, diff_data_2)
+
+#                    ME     RMSE      MAE      MPE      MAPE      MASE       ACF1 Theil's U
+# Training set 302.86666 76738.01 56070.32 90.91896 353.22107 0.9091466 -0.6415545        NA
+# Test set      52.94388 47519.47 38226.88 99.12958  99.12958 0.6198259 -0.3618665 0.8958322
+
+# Looks like this model is overfit.
+```
+
+
+
+
+#### ETS 
+* Notes: Below, we fit multiple ETS models, beginning with a plot of the decomposition of our data.
+```{r}
+autoplot(decompose(south_europe_ts_m))
+```
+
+* Decomposition shows us the patterns of our ETS we can then choose:
+  + error: additive (“A”), multiplicative (“M”), unknown (“Z”)
+  + trend: none (“N”), additive (“A”), multiplicative (“M”), unknown (“Z”)
+  + seasonality: none (“N”), additive (“A”), multiplicative (“M”), unknown (“Z”)
+* ets() estimates both the initial states and smoothing parameters by optimizing the likelihood function (which is only equivalent to optimizing the MSE for the linear additive models). If you want the model to select the best option, use = "ZZZ" and the “optimal” model will be selected.
+
+
+```{r}
+
+# ets will find the parameters for you
+ets_auto<- ets(train) #ETS(M,Ad,M)
+
+ets_auto_fc <- forecast(ets_auto, h = length(test))
+
+# plot and summarize
+autoplot(ets_auto_fc)
+summary(ets_auto)
+
+# check accuracy
+accuracy(ets_auto_fc, test)
+
+#                   ME     RMSE      MAE       MPE     MAPE      MASE       ACF1 Theil's U
+# Training set  4714.92 35958.65 25281.32 0.3450024 2.393413 0.4069762 -0.0564455        NA
+# Test set     59890.33 89410.83 62377.01 3.8130139 3.946629 1.0041388  0.5515216 0.2900773
+```
+
+* ETS() will find parameters for you, but we also tried to optimize the parameters on our own:
+
+```{r}
+
+# Choosing own parameters to try to improve auto ets accuracy (above)
+
+### Additive, Additive, Additive
+ets_aaa <- ets(train, model = "AAA")
+autoplot(forecast(ets_aaa))+ ggtitle("ETS - AAA")
+summary(ets_aaa)
+
+### Multiplicative Multiplicative Multiplicative
+ets_mmm <- ets(train, model = "MMM")
+autoplot(forecast(ets_mmm))+ ggtitle("ETS - MMM")
+summary(ets_mmm)
+
+### Multiplicative, Additive, Additive
+ets_maa <- ets(train, model = "MAA")
+autoplot(forecast(ets_maa))+ ggtitle("ETS - MAA")
+summary(ets_maa)
+
+### Additive, Additive, Multiplicative
+ets_aam <- ets(train, model = "AAM",  restrict = FALSE)
+autoplot(forecast(ets_aam))+ ggtitle("ETS - AAM")
+summary(ets_aam)
+
+###  Multiplicative, Additive, Multiplicative
+ets_mam <- ets(train, model = "MAM")
+autoplot(forecast(ets_mam))+ ggtitle("ETS - MAM")
+summary(ets_mam)
+
+### Optimal Model
+ets_fc_opt <- ets(train, model = "ZZZ") # setting model to "ZZZ" will give you the optimal parameters
+
+autoplot(forecast(ets_fc_opt))+ ggtitle("ETS(M,Ad,M)")
+summary(ets_fc_opt)
+
+checkresiduals(ets_fc_opt)
+
+
+ets_opt <- forecast(ets_fc_opt, h = length(test))
+
+accuracy(ets_opt, test)
+#  Smoothing parameters:
+#    alpha = 0.7558 
+#    beta  = 0.0062 
+#    gamma = 1e-04 
+#    phi   = 0.9777 
+```
+
+```{r}
+ets_f1 <- forecast(ets_aaa, h = length(test))
+accuracy(ets_f1, test)
+#                     ME      RMSE       MAE        MPE      MAPE      MASE
+# Training set   4720.584  46864.94  34369.72  0.3300935  3.302626 0.5532804
+# Test set     -94545.374 171051.47 135512.58 -9.7492477 11.714521 2.1814680
+#     AIC     AICc      BIC 
+# 3353.638 3359.305 3401.855 
+
+ets_f2 <- forecast(ets_mmm, h = length(test))
+accuracy(ets_f2, test)
+#                    ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  4669.134 35897.27 25308.33 0.3287808 2.394707 0.4074109
+# Test set     55354.659 84627.46 58476.46 3.5078162 3.680772 0.9413483
+#     AIC     AICc      BIC 
+# 3272.836 3279.228 3323.889 
+
+ets_f3 <- forecast(ets_maa, h = length(test))
+accuracy(ets_f3, test)
+#                     ME      RMSE       MAE        MPE      MAPE     MASE
+# Training set   4410.507  48254.26  35326.47  0.2640174  3.419934 0.568682
+# Test set     -59309.069 157440.58 128378.53 -7.2038709 10.626490 2.066625
+#     AIC     AICc      BIC 
+# 3354.773 3361.166 3405.826 
+
+
+ets_f4 <- forecast(ets_aam, h = length(test))
+accuracy(ets_f4, test)
+#                    ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  3842.729 35628.41 24905.46 0.3159739 2.376534 0.4009256
+# Test set     39822.985 70208.79 48639.90 2.4979209 3.038618 0.7830002
+#     AIC     AICc      BIC 
+#3286.558 3292.950 3337.611 
+
+ets_f5 <- forecast(ets_mam, h = length(test))
+accuracy(ets_f5, test)
+#                   ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  4714.92 35958.65 25281.32 0.3450024 2.393413 0.4069762
+# Test set     59890.33 89410.83 62377.01 3.8130139 3.946629 1.0041388
+#     AIC     AICc      BIC 
+#3273.247 3279.639 3324.300
+
+```
+
+Calling the "ZZZ" gave us optimal model for MAM, however AAM looks like it has the lowest errors and best accuracy across the models. Lets try to optimize this model by finding the best gamma. 
+
+
+#### optimizing the gamma
+We will attempt to optimize the parameter in our Holt-Winters model. Here, we use the AAM model that minimized our prediction errors above (MAPE) and identify the gamma parameter that minimizes forecast errors. In this case we see that gamma = 0.06 minimizes the error rate.
+```{r}
+
+gamma <- seq(0.01, 0.85, 0.01)
+RMSE <- NA
+
+for(i in seq_along(gamma)) {
+  hw.expo <- ets(train, "AAM", restrict = FALSE, gamma = gamma[i])
+  future <- forecast(hw.expo, h = length(test))
+  RMSE[i] = accuracy(future, test)[2,2]
+}
+
+error <- data_frame(gamma, RMSE)
+minimum <- filter(error, RMSE == min(RMSE))
+ggplot(error, aes(gamma, RMSE)) +
+  geom_line() +
+  geom_point(data = minimum, color = "blue", size = 2) +
+  ggtitle("gamma's impact on forecast errors",
+          subtitle = "gamma = 0.06 minimizes RMSE")
+
+
+```
+
+```{r}
+# print original model for comparison
+accuracy(ets_f4, test)
+#                    ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  3842.729 35628.41 24905.46 0.3159739 2.376534 0.4009256
+# Test set     39822.985 70208.79 48639.90 2.4979209 3.038618 0.7830002
+
+
+# fit model with optimal gamma parameter
+ets_aam_opt_gamma <- ets(train, model = "AAM", restrict = FALSE, gamma = 0.06)
+ets_f6 <- forecast(ets_aam_opt_gamma, h = length(test))
+
+# print new model for comparison
+accuracy(ets_f6, test)
+#                   ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set 3071.692 36992.85 26041.99 0.1720018 2.516764 0.4192214
+# Test set     6848.922 30226.03 25549.42 0.3100556 1.738506 0.4112920
+
+autoplot(ets_f6) + ggtitle("ETS (A,A,M) Forecast")
+
+```
+Updating our model with this “optimal” gamma 0.06, we see that we bring our forecasting error rate down from 3.04% to 1.74%, tho the test error should be worse than the training error so this model is over fit.
+
+```{r}
+
+gamma <- seq(0.01, 0.85, 0.01)
+RMSE <- NA
+
+for(i in seq_along(gamma)) {
+  hw.expo <- ets(train, "MAM", gamma = gamma[i])
+  future <- forecast(hw.expo, h = length(test))
+  RMSE[i] = accuracy(future, test)[2,2]
+}
+
+error <- data_frame(gamma, RMSE)
+minimum2 <- filter(error, RMSE == min(RMSE))
+ggplot(error, aes(gamma, RMSE)) +
+  geom_line() +
+  geom_point(data = minimum2, color = "blue", size = 2) +
+  ggtitle("gamma's impact on forecast errors",
+          subtitle = "gamma = 0.84 minimizes RMSE")
+```
+
+
+```{r}
+minimum2
+
+accuracy(ets_f5, test)
+#                   ME     RMSE      MAE       MPE     MAPE      MASE     
+#Training set  4714.92 35958.65 25281.32 0.3450024 2.393413 0.4069762
+#Test set     59890.33 89410.83 62377.01 3.8130139 3.946629 1.0041388 
+
+# new model with optimal gamma parameter
+ets_mam_opt_gamma <- ets(train, model = "MAM", gamma = 0.84)
+ets_f7 <- forecast(ets_mam_opt_gamma, h = length(test))
+accuracy(ets_f7, test)
+#                    ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  4230.297 36196.51 25331.83 0.2775123 2.391711 0.4077893 
+# Test set     46685.266 76473.64 51304.06 2.8677488 3.190744 0.8258876
+
+autoplot(ets_f7) + ggtitle("ETS (M,A,M) Forecast")
+```
+
+Updating our model with this “optimal” gamma 0.84, we see that we bring our forecasting error rate down from 3.95% to 3.19%.
+
+```{r}
+
+accuracy(ets_f7, test)
+#                    ME     RMSE      MAE       MPE     MAPE      MASE
+# Training set  4230.297 36196.51 25331.83 0.2775123 2.391711 0.4077893 
+# Test set     46685.266 76473.64 51304.06 2.8677488 3.190744 0.8258876
+# lets try damping with the optimal model
+
+ets_mam_opt_damp <- ets(train, model = "MAM",  damped = TRUE, gamma = 0.84, phi = 0.85)
+ets_f8 <- forecast(ets_mam_opt_damp, h = length(test))
+accuracy(ets_f8, test)
+#                    ME     RMSE      MAE         MPE     MAPE      MASE 
+#Training set  6975.356 40755.04 31173.21  0.36865882 2.953685 0.5018232 
+#Test set     -1457.605 62414.95 50371.63 -0.07026508 2.998235 0.8108775 
+```
+
+Damping reduced our testing error but increased our training error.
+
+```{r}
+
+# out of all the ETS() models,  ETS(M,Ad,M) 
+# error = multiplicative
+# trend = damped
+# seasonality = multiplicative
+
+# check out the model
+autoplot(ets_mam_opt_damp)
+ets_mam_opt_damp
+# check residuals and one-step forecast errors from the ETS(M,Ad,M) damped model.
+cbind('Residuals' = residuals(ets_mam_opt_damp),
+      'Forecast errors' = residuals(fit,type='response')) %>%
+  autoplot(facet=TRUE) + xlab("Year") + ylab("")
+
+# check residuals
+checkresiduals(ets_mam_opt_damp)
+
+```
+
+Looks close to white noise...
+
+```{r}
+
+ets_f8 %>% forecast(h=length(test)) %>%
+  autoplot(facets = TRUE) + ggtitle("South EU Passengers | 1 YR Forecast | ETS (M,Ad,M) - Damped") + ylab("Passengers") + xlab("Time")
+
+#                    ME     RMSE      MAE         MPE     MAPE      MASE 
+#Training set  6975.356 40755.04 31173.21  0.36865882 2.953685 0.5018232 
+#Test set     -1457.605 62414.95 50371.63 -0.07026508 2.998235 0.8108775 
+
+```
+
+This is the best ETS() model we have, ETS (M,A,M) - Damped
+```{r}
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(ets_f8, "ETS", test)
+```
+
+
+
+
+#### Arima (Jerry) 
+
+```{r}
+# Build EACF table 
+eacf(train_diff,
+     ar.max = 3,
+     ma.max = 3)
+```
+
+```{r}
+# Construct Arima models using the results fr
+Arima(train_diff,
+      order = c(1,1,0))
+
+Arima(train_diff,
+      order = c(1,1,3))
+
+Arima(train_diff,
+      order = c(2,1,0))
+
+Arima(train_diff,
+      order = c(2,1,1))
+
+Arima(train_diff,
+      order = c(2,1,2))
+
+Arima(train_diff,
+      order = c(2,1,3))
+
+Arima(train_diff,
+      order = c(3,1,1))
+
+Arima(train_diff,
+      order = c(3,1,2))
+
+Arima(train_diff,
+      order = c(3,1,3))
+```
+
+Based on eacf(), ARIMA(3,1,3) has the best AICc
+
+
+```{r}
+arima_model <- Arima(train_diff, 
+                     order = c(3,1,3), 
+                     seasonal = list(order = c(1,1,2), 
+                                     period = 12),
+                     include.drift = TRUE, 
+                     lambda = lambda,
+                     method = "ML")
+
+checkresiduals(arima_model)
+```
+
+```{r}
+plot(forecast(arima_model,
+              h = 12),
+              include = 50)
+```
+
+```{r}
+arima_model_fc <- forecast(arima_model,
+                           h = 12)
+
+accuracy(arima_model_fc, test)
+```
+
+```{r}
+# save RMSE/MAE
+arima_model_rmse_test = accuracy(arima_model_fc, test)["Test set", "RMSE"]
+arima_model_mae_test = accuracy(arima_model_fc, test)["Test set", "MAE"]
+```
+
+
+#### auto.arima (Julian)
+* Notes:  
+  + The residuals for the plots do not appear to be white noise.  
+  + Based on the Ljung-Box test, we cannot accept the null hypothesis of the data to be independent since the p-value < 0.05.  
+  + At lag 11 there is a spike in the ACF plot for the residuals.  
+  + <p style="color:red"> **TEAM don't we have to correct these things?**</p>  
+  + <p style="color:red"> **TEAM Lola summarized the forecasts, Julian summarized the models. Thoughts?**</p>
+  
+```{r}
+# fit auto.arima() model
+# note that the lambda here is pulled from the box-cox transformation performed in step 4.
+auto_arima_model = auto.arima(train, lambda=lambda, stationary=FALSE, seasonal=TRUE)
+
+auto_arima_fc = forecast(auto_arima_model,  h = length(test))
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(auto_arima_fc, "Auto.arima", test)
+
+# In this plot we can observe the multiple seasonality in the data for South Europe
+
+```
+
+
+
+
+#### VAR (Julian)
+```{r}
+# source https://datahub.io/core/cpi-us#r
+json_file = 'https://datahub.io/core/cpi-us/datapackage.json'
+json_data = fromJSON(paste(readLines(json_file), collapse=""))
+
+# get list of all resources:
+print(json_data$resources$name)
+
+# print all tabular data(if exists any)
+for(i in 1:length(json_data$resources$datahub$type)){
+  if(json_data$resources$datahub$type[i]=='derived/csv'){
+    path_to_file = json_data$resources$path[i]
+    dat_cpi      = read.csv(url(path_to_file))
+    print(head(dat_cpi))
+  }
+}
+
+# create year column
+dat_cpi["year"] = substr(dat_cpi[,1], start = 1, stop = 4)
+
+# create month column
+dat_cpi["month"] = substr(dat_cpi[,1], start = 6, stop = 7)
+
+# adjust type
+dat_cpi["month"] = as.numeric(unlist(dat_cpi["month"]))
+dat_cpi["year"]  = as.numeric(unlist(dat_cpi["year"]))
+
+# impute mean for nas in cpi and inflation
+dat_cpi[is.na(dat_cpi[,2]), 2] <- mean(dat_cpi[,2], na.rm = TRUE)
+dat_cpi[is.na(dat_cpi[,3]), 3] <- mean(dat_cpi[,3], na.rm = TRUE)
+
+# create ts object for cpi
+cpi_ts = ts(dat_cpi["Index"], frequency = 12, start=c(1990,1), end=c(2019,6))
+
+# create ts object for inflation
+infl_ts = ts(dat_cpi["Inflation"], frequency = 12, start=c(1990,1), end=c(2019,6))
+```
+
+```{r}
+# plot cpi and inflation
+plot(cpi_ts,  main="CPI in the US from 1900 to 2020")
+plot(infl_ts, main="Inflation in the US from 1900 to 2020")
+```
+
+```{r}
+# ensure stationarity of variables
+cpi_ts_stat = diff(cpi_ts)
+infl_ts_stat = diff(infl_ts)
+south_europe_ts_m_stat = diff(south_europe_ts_m)
+
+# plot new variables
+plot(cpi_ts_stat)
+plot(infl_ts_stat)
+plot(south_europe_ts_m_stat)
+```
+
+
+```{r}
+# select test and training data
+train_travel = window(south_europe_ts_m_stat, c(2008,1), c(2018,6))
+test_travel = window(south_europe_ts_m_stat, c(2018,7))
+train_cpi = window(cpi_ts_stat, c(2008,1), c(2018,6))
+test_cpi = window(cpi_ts_stat, c(2018,7))
+train_infl = window(infl_ts_stat, c(2008,1), c(2018,6))
+test_infl = window(infl_ts_stat, c(2018,7))
+
+# var order selection for number of passengers
+VARselect(cbind(south_europe_ts_m_stat, cpi_ts_stat, infl_ts_stat), lag.max = 15, type = "const")$selection
+
+# build model
+var_model_1 = VAR(cbind(train_travel, train_cpi, train_infl), p=4, type="both", season=12)
+summary(var_model_1)
+var_model_2 = VAR(cbind(train_travel, train_cpi, train_infl), p=12, type="both", season=12)
+summary(var_model_2)
+```
+\
+- Based on the AIC, the VAR(12) should be selected\
+
+```{r}
+# test serial correlation in the residuals
+serial.test(var_model_1, lags.pt = 10, type = "PT.asymptotic")
+
+# plot acf of residuals
+varresids_1 = residuals(var_model_1)
+acf(varresids_1[,1], main="Residuals Number Passengers")
+acf(varresids_1[,2], main="Residuals CPI")
+acf(varresids_1[,3], main="Residuals Inflation")
+acf(varresids_1)
+
+# test serial correlation in the residuals
+serial.test(var_model_2, lags.pt = 10, type = "PT.asymptotic")
+
+# plot acf of residuals
+varresids_2 = residuals(var_model_2)
+acf(varresids_2[,1], main="Residuals Number Passengers")
+acf(varresids_2[,2], main="Residuals CPI")
+acf(varresids_2[,3], main="Residuals Inflation")
+acf(varresids_2)
+```
+\
+- The null hypothesis of the serial.test is that there is no serial correlation in the residuals\
+- For a VAR(12) model, the null hypothesis of the serial.test is rejected\
+- The ACF for the residuals of the number of passengers also shows that there is some pattern in the residuals\
+- A VAR(4) model results in the ability to not reject the null hypothesis for residuals with serial correlation with a p-value > 0.05, but the ACF plot still suggest some pattern in the residuals\
+
+```{r}
+# forecast
+h = 12
+var_fc_1 = forecast(var_model_1, h=h)
+var_fc_2 = forecast(var_model_2, h=h)
+```
+
+```{r}
+# plot test data and forecasts 
+autoplot(test_travel, xlab = "Time", ylab = "Number of passengers",
+         main="12-month forecast for South Europe Monthly with VAR(4) model", series="Test data") +
+  autolayer(var_fc_1$forecast$train_travel$mean, series="Forecast VAR(4) model")
+```
+
+```{r}
+# plot the forecast
+plot(var_fc_1)
+```
+
+
+```{r}
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(var_fc_1$forecast$train_travel, "VAR", test_travel)
+
+
+```
+
+
+#### TBATS()
+```{r}
+# fit tbats
+tbats_fit <- tbats(train)
+
+# forecast
+tbats_fc <- forecast(tbats_fit, h =length(test)) 
+
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(tbats_fc, "TBATS", test)
+```
+
+
+#### Multiple seasonality (Kelley)
+```{r}
+# fit auto.arima model with fourier
+multiple_seasonality_model = auto.arima(train, xreg=fourier(train, K=5), seasonal=FALSE)
+
+# summary
+summary(multiple_seasonality_model)
+
+# investigate residuals
+checkresiduals(multiple_seasonality_model)
+```
+
+
+```{r}
+# forecast into the future
+multiple_seasonality_fc = forecast(multiple_seasonality_model, xreg = fourier(train, K=5, h=24), level=c(80, 95))
+
+# plot the forecast
+plot(multiple_seasonality_fc, 
+     main="24-month forecast for South Europe Monthly with auto arima model with fourier term")
+```
+
+
+### Step 8: Accuracy{.tabset}
+#### Summary of accuracy scores - Tabular
+```{r}
+
+# print table of accuracy scores
+mykable(accuracy_df)
+
+```
+
+#### Summary of accuracy scores - Plotted
+```{r, include=TRUE}
+# plot the Mean absolute error
+plots <- as.vector(accuracy_df$model_name)
+
+accuracy_long = accuracy_df %>%
+                   dplyr::select(c(model_name, starts_with("x")))%>%
+                   reshape2::melt(id.vars="model_name") %>%
+                   mutate(horizon = as.numeric(substr(variable, 3, length(variable)))) %>%
+                   rename(error = value)
+
+
+accuracy_long %>%
+  ggplot(aes(x=horizon, y=error/1000, group=model_name, color=model_name)) +
+    geom_line() +
+    scale_y_continuous(name ="Error (thousands of passengers)")+
+    scale_x_continuous(name = "Forecast horizon (Month)") +
+    scale_color_viridis(option="magma", discrete = TRUE) +
+    ggtitle("Forecast error across models, by horizon month") + 
+    theme_minimal() +
+    theme(legend.position="bottom")
+
+accuracy_long$name2 <- accuracy_long$model_name
+accuracy_long %>%
+  ggplot( aes(x=horizon, y=error/1000)) +
+    geom_line(data=accuracy_long %>% dplyr::select(-model_name), aes(group=name2), color="light grey", size=0.5, alpha=0.5) +
+    geom_line(aes(color=model_name), color="white", size=1.2 )+
+    scale_color_viridis(discrete = TRUE) +
+    scale_y_continuous(name ="Error (thousands of passengers)")+
+    scale_x_continuous(name = "Forecast horizon (Month)") +
+    theme_minimal() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=14, colour = "white"),
+      panel.grid = element_blank(),
+      text = element_text(colour = "white"),
+      axis.text = element_text(colour = "white"),
+      legend.text  = element_text(color = "white"),
+      legend.title = element_text(color = "white"),
+      panel.background = element_rect(fill = grDevices::rgb(55,57,78, maxColorValue=255, alpha=255), colour = NA),
+      plot.background = element_rect(fill = grDevices::rgb(55,57,78, maxColorValue=255, alpha=255), colour = NA),
+      strip.background =element_rect(fill="white"),
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank()
+    ) +
+    ggtitle("Forecast error across models, by horizon month") +
+    facet_wrap(~model_name)
+
+# also plot mean absolute error
+
+accuracy_df = accuracy_df[order(accuracy_df$fore_err),]
+accuracy_df %>%
+  ggplot(aes(x=model_name, y=fore_err/1000)) +
+    geom_bar(stat = "identity", fill="white") +
+    scale_y_continuous(name ="Error (thousands of passengers)")+
+    scale_x_discrete(name = "Model name") +
+    ggtitle("Forecast error across models, overall") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          text = element_text(colour = "white"),
+          axis.text = element_text(colour = "white"),
+          plot.title   = element_text(colour = "white"),
+          legend.text  = element_text(color = "white"),
+          legend.title = element_text(color = "white"),
+          legend.position="none",
+          panel.background = element_rect(fill = grDevices::rgb(55,57,78, maxColorValue=255, alpha=255), colour = NA),
+          plot.background = element_rect(fill = grDevices::rgb(55,57,78, maxColorValue=255, alpha=255), colour = NA),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank())
+
+
+```
+
+
+
+
+
+
+
+
