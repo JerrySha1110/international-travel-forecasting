@@ -34,6 +34,7 @@ library(jsonlite)
 library(vars)
 library(summarytools)
 library(dygraphs) 
+library(viridis)
 
 # common functions
 
@@ -57,8 +58,7 @@ path = "C:/Users/KMonzella/OneDrive - Mathematica/Desktop/MScA Program Work/Time
 filename = "_01_International_Report_Passengers.csv"
 
 ```
-library(viridis)
-library(ggplot2)
+
 
 ### Step 1. Read in data and check structure{.tabset}
 ```{r}
@@ -96,8 +96,6 @@ print(dfSummary(df,
 
 ### Step 2. Data cleaning
 * In this step, we created numeric versions of previously character variable to be used in analyses. Updated variables include:  
-  + Total number of passengers
-  + <p style="color:red"> what does scheduled mean?? </p>
 ```{r step2, echo=TRUE}
 
 # to numeric
@@ -266,10 +264,11 @@ tsdisplay(south_europe_ts_m_deseasonal, main="ACF and PACF with seasonal and non
 ```
 
 
+
+
 ### Step 6. Modeling preparation{.tabset}
 #### Addressing stationarity for modeling
-* From our exploration, we found that the data were not stationary. Therefore, we need to correct for stationarity before modeling
-* <p style="color:red"> TEAM: Lola performed this differencing in the data to make it stationary but it doesn't look like we used it in any modeling. Thoughts? Is it enough to just use "stationarity= FALSE"  in models? </p> 
+* From our exploration, we found that the data were not stationary. Therefore, we need to correct for stationarity before modeling models that do not automatically difference the data or account for stationarity.
 ```{r}
 
 # take seasonal difference to remove seasonality
@@ -573,14 +572,14 @@ ses_fc_diff <- ses(train_diff, alpha = 0.78, h = length(test_diff))
 accuracy_df  = plotsumm(ses_fc_diff, "SES - diff", test_diff)
 
 # check residuals and one-step forecast 
-cbind('Residuals' = residuals(ses_2),
+cbind('Residuals' = residuals(ses_fc_diff),
       'Forecast errors' = residuals(fit,type='response')) %>%
   autoplot(facet=TRUE) + xlab("Year") + ylab("")
 
 # check residuals
 checkresiduals(ses_fc_diff)
 
-ses_2 %>%autoplot(facets = TRUE) + ggtitle("South EU Passengers | 1 YR Forecast | SES alpha 0.78 - diff") + ylab("Passengers") + xlab("Time")
+ses_fc_diff %>%autoplot(facets = TRUE) + ggtitle("South EU Passengers | 1 YR Forecast | SES alpha 0.78 - diff") + ylab("Passengers") + xlab("Time")
 
 # check accuracy
 accuracy(ses_fc_diff, test_diff)
@@ -924,7 +923,7 @@ ets_fc_diff %>%
   dyCSS(textConnection(".dygraph-legend {background-color: rgba(255, 255, 255, 0.5) !important; }"))
 ```
 
-#### TBATS (Lola)
+#### TBATS
 ```{r}
 # fit tbats
 tbats_fit <- tbats(train)
@@ -1020,7 +1019,7 @@ ggplot(train_plot, aes(x = date, y = train_diff)) + geom_line(color = "black")  
 ```
 
 
-#### Arima (Jerry) 
+#### Arima
 
 ```{r}
 # Build EACF table 
@@ -1071,36 +1070,20 @@ arima_model <- Arima(train_diff,
                      lambda = lambda,
                      method = "ML")
 
-checkresiduals(arima_model)
-```
-
-```{r}
-plot(forecast(arima_model,
-              h = 12),
-              include = 50)
-```
-
-```{r}
 arima_model_fc <- forecast(arima_model,
                            h = 12)
 
-accuracy(arima_model_fc, test)
-```
-
-```{r}
-# save RMSE/MAE
-arima_model_rmse_test = accuracy(arima_model_fc, test)["Test set", "RMSE"]
-arima_model_mae_test = accuracy(arima_model_fc, test)["Test set", "MAE"]
+# plot, summarize, and store accuracy information from the forecast
+accuracy_df  = plotsumm(arima_model_fc, "ARIMA", test_diff)
 ```
 
 
-#### auto.arima (Julian)
+#### auto.arima
 * Notes:  
   + The residuals for the plots do not appear to be white noise.  
   + Based on the Ljung-Box test, we cannot accept the null hypothesis of the data to be independent since the p-value < 0.05.  
   + At lag 11 there is a spike in the ACF plot for the residuals.  
-  + <p style="color:red"> **TEAM don't we have to correct these things?**</p>  
-  + <p style="color:red"> **TEAM Lola summarized the forecasts, Julian summarized the models. Thoughts?**</p>
+
   
 ```{r}
 # fit auto.arima() model
@@ -1119,7 +1102,7 @@ accuracy_df  = plotsumm(auto_arima_fc, "Auto.arima", test)
 
 
 
-#### VAR (Julian)
+#### VAR 
 ```{r}
 # source https://datahub.io/core/cpi-us#r
 json_file = 'https://datahub.io/core/cpi-us/datapackage.json'
@@ -1253,29 +1236,25 @@ accuracy_df  = plotsumm(var_fc_1$forecast$train_travel, "VAR", test_travel)
 
 ```
 
-
-
-#### Multiple seasonality (Kelley)
-```{r}
+#### Multiple seasonality
+```{r, eval=FALSE}
 # fit auto.arima model with fourier
-multiple_seasonality_model = auto.arima(train, xreg=fourier(train, K=5), seasonal=FALSE)
 
-# summary
-summary(multiple_seasonality_model)
+msts_train<-train %>% msts(seasonal.periods = c(5, 6*2))
+msta_test<-test%>% msts(seasonal.periods = c(5, 6*2))
 
-# investigate residuals
-checkresiduals(multiple_seasonality_model)
+tbats_mod <- msts_train %>%
+             tbats(use.box.cox = FALSE, 
+                  use.trend = TRUE, 
+                  use.damped.trend = TRUE)
+
+tbats_model <-  forecast(tbats_mod,h=12) 
+
+accuracy_df  = plotsumm(tbats_model, "Multiple seasonality", msta_test)
+
+
 ```
 
-
-```{r}
-# forecast into the future
-multiple_seasonality_fc = forecast(multiple_seasonality_model, xreg = fourier(train, K=5, h=24), level=c(80, 95))
-
-# plot the forecast
-plot(multiple_seasonality_fc, 
-     main="24-month forecast for South Europe Monthly with auto arima model with fourier term")
-```
 
 
 ### Step 8: Accuracy{.tabset}
@@ -1296,7 +1275,15 @@ accuracy_long = accuracy_df %>%
                    dplyr::select(c(model_name, starts_with("x")))%>%
                    reshape2::melt(id.vars="model_name") %>%
                    mutate(horizon = as.numeric(substr(variable, 3, length(variable)))) %>%
-                   rename(error = value)
+                   rename(error = value) %>%
+                   filter(model_name != "Average" & 
+                          model_name != "Naive"   &
+                          model_name != "SES"     &
+                          model_name != "Random Walk w/ drift" & 
+                          model_name != "Seasonal Naive" &
+                          model_name != "ETS - diff" &
+                          model_name != "TBATS - diff" & 
+                          model_name != "Holt Winters - diff")
 
 
 accuracy_long %>%
