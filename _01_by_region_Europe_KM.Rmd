@@ -475,10 +475,10 @@ accuracy_df  = plotsumm(rwf_fc_diff, "Random Walk w/ drift - diff", test_diff)
   + HoltWinters() uses heuristic values for the initial states and then estimates the smoothing parameters by optimizing the MSE.
 ```{r}
 # holt winters forecast
-hw_fc <- forecast(HoltWinters(train), h = length(test), damped = TRUE, seasonal = "multiplicative")
+hw_fc <- forecast(HoltWinters(train), h = length(test), damped = TRUE)
 
 # plot, summarize, and store accuracy information from the forecast
-accuracy_df  = plotsumm(hw_fc, "Holt Winters - Multiplicative", test)
+accuracy_df  = plotsumm(hw_fc, "Holt Winters - Additive", test)
 ```
 
 ```{r}
