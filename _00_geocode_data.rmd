@@ -1,0 +1,208 @@
+---
+title: "Group Project Geocoding"
+author: "Team 5 - LJ, JK, KM, JS"
+date: "7/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# install necessary packages
+
+# install.packages('kableExtra')
+# install.packages('tidyverse')
+# install.packages('janitor')
+# install.packages('maps')
+# install.packages('geosphere')
+# install.packages('data.table')
+
+# load necessary packages
+library(tidyverse)
+library(kableExtra)
+library(janitor)
+library(maps)
+library(geosphere)
+library(data.table)
+
+# load common helpful functions
+# for fancy tables
+mykable <- function(x, ...) {
+  kable(x, ...) %>% kable_styling(bootstrap_options = c("responsive", "consensed", "hover", "striped"))
+}
+
+# for printing cross tabulations
+tablist <- function(df, ...) {
+  group_var <- quos(...)
+  if (nrow(df)==0) {
+    return("No observations")
+  }
+  df$tot <- nrow(df)
+  df %>% 
+    group_by(!!!group_var) %>%
+    summarise(
+      n   = n(),
+      pct = max(100 * (n / tot))
+    )
+}
+
+# define pathways and file names
+path     <- "C:/Users/KMonzella/OneDrive - Mathematica/Desktop/MScA Program Work/Time Series Analysis and Forecasting/Final project"
+filename <- "International_Report_Passengers.csv"
+```
+
+### Step 1. Read in data
+```{r s1}
+
+# set working directory
+setwd(path)
+
+# read in flight data and pass through clean_names() function from janitor package
+df <- fread(file.path(filename)) %>% clean_names()
+
+# store names of df for later use
+cnam <-colnames(df)
+
+# read in airport codes
+# source of data: https://www.partow.net/miscellaneous/airportdatabase/index.html#Downloads
+iata <- read.delim(file.path("GlobalAirportDatabase.txt"), header = FALSE, sep = ":", dec = ".")
+
+# attach column names
+names <-c("icao", 
+          "iata", 
+          "airport", 
+          "city", 
+          "country", 
+          "latitude_degrees", 
+          "latitude_minutes",
+          "latitude_seconds",
+          "latitude_direction",
+          "longitude_degrees",
+          "longitude_minutes",
+          "longitude_seconds",
+          "longitude_direction",
+          "altitude",
+          "latitude_decimal_degrees",
+          "longitude_decimal_degrees")
+
+colnames(iata) <- names
+
+# check recode
+names(iata)
+
+# keep just the variables of interest. Also rename iata to have root that matches flight data
+iata <- iata %>% 
+          select("icao", "iata", "airport", "city", "country", ends_with("decimal_degrees")) %>%
+          rename(apt = iata) %>%
+          filter(apt != "N/A")
+
+# check recode
+names(iata)
+    
+```
+
+### Step 2. Merge IATA codes to airports
+```{r step2}
+
+# create merge indicators
+df$in_flights <- 1
+iata$in_iata  <- 1
+
+# merge multiple times, so write in loop
+merge_files <- function(df, df2, prefix, byvar){
+  
+  # rename iata variables so that they are unique across merges (not overwritten)
+  # this also creates the right merge variables that we need
+  colnames(df2) <- paste(prefix, colnames(df2), sep = "_")
+  
+  # check recode
+  print(names(df2))
+  
+  # merge, limiting to observations in df
+  df <- merge(x=df, y=df2, by=byvar, all=TRUE) %>% filter(in_flights==1)
+  
+  # output file
+  return(df)
+}
+
+df <- merge_files(df, iata, "usg", "usg_apt")
+df <- merge_files(df, iata, "fg",  "fg_apt")
+
+# check merge rates
+print(tablist(df, in_flights, usg_in_iata, fg_in_iata))
+
+# check mismerges
+c <- df %>%
+       filter(is.na(usg_in_iata)| is.na(fg_in_iata))
+# minimal missingness. drop missing cases.
+df2 <- df %>%
+         filter(!is.na(usg_in_iata) & !is.na(fg_in_iata) & 
+                usg_airport!="N/A"  & fg_airport!="N/A") 
+
+stopifnot(nrow(df2)==613852)
+
+write.csv(df2, "_01_International_Report_Passengers.csv")
+```
+
+### Step 3. Generate full list of any airport
+```{r step3}
+# split into two datasets
+
+df2_usg <- df2 %>% select(starts_with("usg")) %>% select(-(c("usg_wac", "usg_apt_id")))  
+df2_fg  <- df2 %>% select(starts_with("fg"))  %>% select(-(c("fg_wac", "fg_apt_id")))
+
+# make sure column number is the same
+stopifnot(ncol(df2_usg)==ncol(df2_fg))
+
+# remove usg/fg prefix before stacking
+names(df2_usg) = gsub(pattern = "usg_", replacement = "", x=names(df2_usg))
+names(df2_fg)  = gsub(pattern = "fg_",  replacement = "", x=names(df2_fg))
+
+stopifnot(names(df2_fg)==names(df2_usg))
+
+# stack and filter to unique obs 
+airports <- rbind(df2_usg, df2_fg) %>% distinct()
+
+# check for duplicates
+df3 <- airports %>%
+         group_by(apt, icao) %>%
+         mutate(row = n()) %>%
+         ungroup()
+
+print(tablist(df3, row))
+```
+
+### Step 4. Graphs
+```{r step4}
+
+# Plot a map of the united states:
+map("world", col="grey20", fill=TRUE, bg="black", lwd=0.1)
+
+# Using airports data: Add a point on the map for each airport:
+points(x=df3$longitude_decimal_degrees, y=airports$latitude_decimal_degrees, pch=19,
+cex=airports$Visits/80, col="orange") 
+
+# color palette for edges so that we can eventually apply a different weight
+col.1 <-adjustcolor("orange red", alpha=0.4)
+col.2 <-adjustcolor("orange",     alpha=0.4)
+
+edge.pal <-colorRampPalette(c(col.1, col.2), alpha = TRUE)
+edge.col <- edge.pal(100)
+
+# using flights data: find the shortest path between airports
+flights <- df2 %>% slice(1:1000)
+
+for(i in 1:nrow(flights)) {
+  node1 <- airports[airports$apt == flights[i,]$usg_apt,]
+  node2 <- airports[airports$apt == flights[i,]$fg_apt,]
+  arc   <- gcIntermediate(c(node1[1,]$longitude_decimal_degrees,    node1[1,]$latitude_decimal_degrees),
+                          c(node2[1,]$longitude_decimal_degrees, node2[1,]$latitude_decimal_degrees),
+                          n=1000, addStartEnd=TRUE )
+  
+  #edge.ind <- round(100*flights[i,]$Freq / max(flights$Freq))
+  # placeholder
+  edge.ind <- 50
+  lines(arc, col=edge.col[edge.ind], lwd=edge.ind/30)
+}
+
+```
