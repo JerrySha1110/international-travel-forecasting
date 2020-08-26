@@ -305,6 +305,7 @@ test_diff  = window(diff_data_2,  c(2018,7))
 
 accuracy_df = data.frame(model_name    = character(),
                          mae           = numeric(),    # mean absolute error
+                         mape          = numeric(),    # mean absolute percentage error
                          fore_err      = numeric())    # one year forecast error
 
 
@@ -319,6 +320,10 @@ check_accuracy <- function(modelname, quo_modelname, testdf){
     # MAE
     mae  = mean(abs(modelname[['mean']]-testdf), na.rm=TRUE)
     
+    # MAPE
+    m = accuracy(modelname, testdf)
+    mape = m[2, 5]
+    
     # for each forecast value in the horizon, calculate the error
     m_err  = as.data.frame(abs(modelname[['mean']]-testdf)) %>% mutate(rowvalue= 1, rown = row_number())
     
@@ -328,12 +333,12 @@ check_accuracy <- function(modelname, quo_modelname, testdf){
     # bind into dataset
     df   = data.frame(model_name = quo_modelname,
                       mae        = mae,
+                      mape       = mape,
                       fore_err   = err)
     
-    # bind wide forecasts for each month. Note that the cbind.fill here is needed because the modelname and fore_err columns are not in the wide df
-    # and the month-specific columns are not in the df dataframe.
+    # bind wide forecasts for each month. 
     
-     df   = rowr::cbind.fill(df, wide)
+     df   = cbind(df, wide)
 
     # bind with accuracy df from previous models
     accuracy_df <- bind_rows(accuracy_df, df)
@@ -1029,7 +1034,7 @@ eacf(train_diff,
 ```
 
 ```{r}
-# Construct Arima models using the results fr
+# Construct Arima models using the results from eacf
 Arima(train_diff,
       order = c(1,1,0))
 
@@ -1080,9 +1085,7 @@ accuracy_df  = plotsumm(arima_model_fc, "ARIMA", test_diff)
 
 #### auto.arima
 * Notes:  
-  + The residuals for the plots do not appear to be white noise.  
-  + Based on the Ljung-Box test, we cannot accept the null hypothesis of the data to be independent since the p-value < 0.05.  
-  + At lag 11 there is a spike in the ACF plot for the residuals.  
+  + At lag 11 there is a spike in the ACF plot for the residuals. We expect this to be the multiple seasonality that we visualized in our EDA. 
 
   
 ```{r}
@@ -1094,7 +1097,6 @@ auto_arima_fc = forecast(auto_arima_model,  h = length(test))
 
 # plot, summarize, and store accuracy information from the forecast
 accuracy_df  = plotsumm(auto_arima_fc, "Auto.arima", test)
-
 # In this plot we can observe the multiple seasonality in the data for South Europe
 
 ```
@@ -1163,11 +1165,11 @@ plot(south_europe_ts_m_stat)
 ```{r}
 # select test and training data
 train_travel = window(south_europe_ts_m_stat, c(2008,1), c(2018,6))
-test_travel = window(south_europe_ts_m_stat, c(2018,7))
-train_cpi = window(cpi_ts_stat, c(2008,1), c(2018,6))
-test_cpi = window(cpi_ts_stat, c(2018,7))
-train_infl = window(infl_ts_stat, c(2008,1), c(2018,6))
-test_infl = window(infl_ts_stat, c(2018,7))
+test_travel  = window(south_europe_ts_m_stat, c(2018,7))
+train_cpi    = window(cpi_ts_stat,            c(2008,1), c(2018,6))
+test_cpi     = window(cpi_ts_stat,            c(2018,7))
+train_infl   = window(infl_ts_stat,           c(2008,1), c(2018,6))
+test_infl    = window(infl_ts_stat,           c(2018,7))
 
 # var order selection for number of passengers
 VARselect(cbind(south_europe_ts_m_stat, cpi_ts_stat, infl_ts_stat), lag.max = 15, type = "const")$selection
@@ -1236,33 +1238,21 @@ accuracy_df  = plotsumm(var_fc_1$forecast$train_travel, "VAR", test_travel)
 
 ```
 
-#### Multiple seasonality
-```{r, eval=FALSE}
-# fit auto.arima model with fourier
-
-msts_train<-train %>% msts(seasonal.periods = c(5, 6*2))
-msta_test<-test%>% msts(seasonal.periods = c(5, 6*2))
-
-tbats_mod <- msts_train %>%
-             tbats(use.box.cox = FALSE, 
-                  use.trend = TRUE, 
-                  use.damped.trend = TRUE)
-
-tbats_model <-  forecast(tbats_mod,h=12) 
-
-accuracy_df  = plotsumm(tbats_model, "Multiple seasonality", msta_test)
-
-
-```
-
 
 
 ### Step 8: Accuracy{.tabset}
 #### Summary of accuracy scores - Tabular
 ```{r}
 
+accuracy_df   = accuracy_df %>%
+                   filter(model_name == "ETS" |
+                          model_name == "ARIMA" |
+                          model_name == "Auto.arima" |
+                          model_name == "TBATS" |
+                          model_name == "VAR")
+
 # print table of accuracy scores
-mykable(accuracy_df)
+mykable(accuracy_df[order(accuracy_df$fore_err),])
 
 ```
 
@@ -1271,19 +1261,15 @@ mykable(accuracy_df)
 # plot the Mean absolute error
 plots <- as.vector(accuracy_df$model_name)
 
+# limit data to prints we plan to present in class - all on same differenced scale for ease of interpretation
+# if we want to compare the models that were also differenced for seasonality and trend, we can dedifference the data.
+# Those models are not presented in our presentation for time and space reasons, and to focus on the models that we tuned most closely.
+
 accuracy_long = accuracy_df %>%
                    dplyr::select(c(model_name, starts_with("x")))%>%
                    reshape2::melt(id.vars="model_name") %>%
                    mutate(horizon = as.numeric(substr(variable, 3, length(variable)))) %>%
-                   rename(error = value) %>%
-                   filter(model_name != "Average" & 
-                          model_name != "Naive"   &
-                          model_name != "SES"     &
-                          model_name != "Random Walk w/ drift" & 
-                          model_name != "Seasonal Naive" &
-                          model_name != "ETS - diff" &
-                          model_name != "TBATS - diff" & 
-                          model_name != "Holt Winters - diff")
+                   rename(error = value) 
 
 
 accuracy_long %>%
