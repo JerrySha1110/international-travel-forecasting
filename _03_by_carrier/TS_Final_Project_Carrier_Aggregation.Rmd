@@ -1,0 +1,506 @@
+---
+title: "TS - Final Project - Modeling Test"
+author: "Jerry Sha"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(fpp)
+library(tseries)
+library(forecast)
+library(TSA)
+library(zoo)
+
+library(tidyverse)
+library(xts)
+```
+
+# -------------------------------------------------------
+# Load Data
+# -------------------------------------------------------
+
+```{r}
+dataPath <- "E:/UChicago/4 - Summer 2020/Times Series Analysis/Final Project/"
+
+flight_data <- read.csv(file = paste0(dataPath,"International_Report_Passengers.csv"),
+                        header = TRUE)
+```
+
+
+```{r}
+# Convert passenger counts from factors into numeric
+# Note that commas are removed to avoid NAs
+flight_data$scheduled <- as.numeric(as.character(gsub(",","", flight_data$scheduled)))
+flight_data$charter <- as.numeric(as.character(gsub(",","", flight_data$charter)))
+flight_data$total <- as.numeric(as.character(gsub(",","", flight_data$total)))
+
+flight_data$data_dte <- as.Date(flight_data$data_dte , format = "%m/%d/%Y")
+```
+
+```{r}
+head(flight_data, 3)
+```
+
+# -------------------------------------------------------
+# Isolate carriers - Select samples for testing
+# -------------------------------------------------------
+
+```{r}
+flight_data_AA <- flight_data %>% filter(carrier == "AA") # American Airlines
+flight_data_DL <- flight_data %>% filter(carrier == "DL") # Delta
+flight_data_UA <- flight_data %>% filter(carrier == "UA") # United Airlines
+flight_data_AC <- flight_data %>% filter(carrier == "AC") # Air Canada
+flight_data_BA <- flight_data %>% filter(carrier == "BA") # British Airways
+
+# Additional carriers for manual merger adjustments
+flight_data_US <- flight_data %>% filter(carrier == "US") # US Airways; merged with AA
+flight_data_NW <- flight_data %>% filter(carrier == "NW") # Northwest; merged with DL
+flight_data_CO <- flight_data %>% filter(carrier == "CO") # Continental; merged with UA
+```
+
+
+```{r}
+flight_data %>% filter(carrier == "NW")
+```
+
+
+
+# -------------------------------------------------------
+# Testing - American Airlines (AA)
+# -------------------------------------------------------
+
+```{r}
+# Count American Airlines (AA) flights
+flight_count_AA <- flight_data_AA %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_AA <- xts(flight_count_AA$count,flight_count_AA$data_dte)
+
+
+
+# Count US Airways (US) flights
+flight_count_US <- flight_data_US %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_US <- xts(flight_count_US$count,flight_count_US$data_dte)
+
+
+
+# Combine AA and US time series to reflect merger
+flight_count_AA_merged <- flight_count_AA + merge(flight_count_US, index(flight_count_AA), fill = 0)
+head(flight_count_AA_merged)
+```
+
+
+
+```{r}
+# Count American Airlines (AA) passengers
+pass_count_AA <- flight_data_AA %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_AA <- xts(pass_count_AA$total,pass_count_AA$data_dte)
+
+
+
+# Count US Airways (US) passengers
+pass_count_US <- flight_data_US %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_US <- xts(pass_count_US$total,pass_count_US$data_dte)
+
+
+
+# Combine AA and US time series to reflect merger
+pass_count_AA_merged <- pass_count_AA + merge(pass_count_US, index(pass_count_AA), fill = 0)
+head(pass_count_AA_merged)
+```
+
+```{r}
+plot(flight_count_AA)
+plot(pass_count_AA)
+```
+
+```{r}
+plot(flight_count_AA_merged)
+plot(pass_count_AA_merged)
+```
+
++ United Airlines (UA) merged with US Airways (US) in 2013
+
+```{r}
+pass_count_AA_merged %>% 
+  BoxCox(lambda = "auto") %>%
+  plot(main = "Passenger Count - AA - Box-Cox Transformed")
+```
+
+
+
+
+```{r}
+training_AA <- pass_count_AA_merged["2008-01/2018-05"]
+testing_AA <- pass_count_AA_merged["2018-06/"]
+```
+
+
+```{r}
+(arima_AA <- auto.arima(ts(training_AA,
+                           frequency = 12),
+                        seasonal = TRUE,
+                        lambda = "auto"))
+```
+
+
+
+```{r}
+plot(forecast(arima_AA,
+              h = 12),
+     include = 50)
+```
+
+
+# -------------------------------------------------------
+# Testing - Delta (DL)
+# -------------------------------------------------------
+
+```{r}
+# Delta (DL) flight count
+flight_count_DL <- flight_data_DL %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_DL <- xts(flight_count_DL$count,flight_count_DL$data_dte)
+
+
+
+# Northwest (NW) flight count
+flight_count_NW <- flight_data_NW %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_NW <- xts(flight_count_NW$count,flight_count_NW$data_dte)
+
+
+
+# Delta-Northwest merger
+flight_count_DL_merged <- flight_count_DL + merge(flight_count_NW, index(flight_count_DL), fill = 0)
+
+```
+
+```{r}
+# Delta (DL) passenger count
+pass_count_DL <- flight_data_DL %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_DL <- xts(pass_count_DL$total,pass_count_DL$data_dte)
+
+
+
+# Northwest (NW) passenger count
+pass_count_NW <- flight_data_NW %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_NW <- xts(pass_count_NW$total,pass_count_NW$data_dte)
+
+
+
+# Delta-Northwest merger
+pass_count_DL_merged <- pass_count_DL + merge(pass_count_NW, index(pass_count_DL), fill = 0)
+```
+
+
+```{r}
+plot(flight_count_DL)
+plot(pass_count_DL)
+```
+
+
+```{r}
+plot(flight_count_DL_merged)
+plot(pass_count_DL_merged)
+```
+
++ Delta (DL) merged with Northwest Airlines (NW) in 2008
+
+
+```{r}
+pass_count_DL_merged %>% 
+  BoxCox(lambda = "auto") %>%
+  plot(main = "Passenger Count - DL - Box-Cox Transformed")
+```
+
+```{r}
+training_DL <- pass_count_DL_merged["2008-01/2018-05"]
+testing_DL <- pass_count_DL_merged["2018-06/"]
+```
+
+```{r}
+(arima_DL <- auto.arima(ts(training_DL,
+                           frequency = 12),
+                        seasonal = TRUE,
+                        lambda = "auto"))
+```
+
+```{r}
+plot(forecast(arima_DL,
+              h = 12),
+     include = 50)
+```
+
+# -------------------------------------------------------
+# Testing - United Airlines (UA)
+# -------------------------------------------------------
+
+```{r}
+# United Airlines (UA) flight count
+flight_count_UA <- flight_data_UA %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_UA <- xts(flight_count_UA$count,flight_count_UA$data_dte)
+
+
+
+# Continental (CO) flight count
+flight_count_CO <- flight_data_CO %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_CO <- xts(flight_count_CO$count,flight_count_CO$data_dte)
+
+
+
+# United-Continental merger
+flight_count_UA_merged <- flight_count_UA + merge(flight_count_CO, index(flight_count_UA), fill = 0)
+```
+
+```{r}
+# United Airlines (UA) passenger count
+pass_count_UA <- flight_data_UA %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_UA <- xts(pass_count_UA$total,pass_count_UA$data_dte)
+
+
+
+# Continental (CO) passenger count
+pass_count_CO <- flight_data_CO %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_CO <- xts(pass_count_CO$total,pass_count_CO$data_dte)
+
+
+
+# United-Continental merger
+pass_count_UA_merged <- pass_count_UA + merge(pass_count_CO, index(pass_count_UA), fill = 0)
+```
+
+```{r}
+plot(flight_count_UA)
+plot(pass_count_UA)
+```
+
+```{r}
+plot(flight_count_UA_merged)
+plot(pass_count_UA_merged)
+```
+
++ Spike in data comes from 2010-2012 merger with Continental (CO)
+
+```{r}
+pass_count_UA_merged %>% 
+  BoxCox(lambda = "auto") %>%
+  plot(main = "Passenger Count - UA - Box-Cox Transformed")
+```
+
+```{r}
+training_UA <- pass_count_UA_merged["2008-01/2018-05"]
+testing_UA <- pass_count_UA_merged["2018-06/"]
+```
+
+
+```{r}
+(arima_UA <- auto.arima(ts(training_UA,
+                           frequency = 12),
+                        seasonal = TRUE,
+                        lambda = "auto"))
+```
+
+```{r}
+plot(forecast(arima_UA,
+              h = 12),
+     include = 50)
+```
+
+
+
+# -------------------------------------------------------
+# Testing - Air Canada (AC)
+# -------------------------------------------------------
+
+```{r}
+flight_count_AC <- flight_data_AC %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_AC <- xts(flight_count_AC$count,flight_count_AC$data_dte)
+
+head(flight_count_AC)
+```
+
+```{r}
+pass_count_AC <- flight_data_AC %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_AC <- xts(pass_count_AC$total,pass_count_AC$data_dte)
+
+head(pass_count_AC)
+```
+
+
+```{r}
+plot(flight_count_AC)
+plot(pass_count_AC)
+```
+
++ Air Canada acquired Canadian Airlines in 2000
+
+```{r}
+pass_count_AC %>% 
+  BoxCox(lambda = "auto") %>%
+  plot(main = "Passenger Count - AC - Box-Cox Transformed")
+```
+
+```{r}
+training_AC <- pass_count_AC["2008-01/2018-05"]
+testing_AC <- pass_count_AC["2018-06/"]
+```
+
+
+```{r}
+(arima_AC <- auto.arima(ts(training_AC,
+                           frequency = 12),
+                        seasonal = TRUE,
+                        lambda = "auto"))
+```
+
+```{r}
+plot(forecast(arima_AC,
+              h = 12),
+     include = 50)
+```
+
+
+
+
+# -------------------------------------------------------
+# Testing - British Airways (BA)
+# -------------------------------------------------------
+
+```{r}
+flight_count_BA <- flight_data_BA %>%
+  group_by(data_dte) %>%
+  summarize(count = n()) %>%
+  arrange(desc(desc(data_dte)))
+
+flight_count_BA <- xts(flight_count_BA$count,flight_count_BA$data_dte)
+
+head(flight_count_BA)
+```
+
+```{r}
+pass_count_BA <- flight_data_BA %>%
+  group_by(data_dte) %>%
+  summarize(total = sum(total)) %>%
+  arrange(desc(desc(data_dte)))
+
+pass_count_BA <- xts(pass_count_BA$total,pass_count_BA$data_dte)
+
+head(pass_count_BA)
+```
+
+
+```{r}
+plot(flight_count_BA)
+plot(pass_count_BA)
+```
+
+```{r}
+pass_count_BA %>% 
+  BoxCox(lambda = "auto") %>%
+  plot(main = "Passenger Count - BA - Box-Cox Transformed")
+```
+
+
+```{r}
+training_BA <- pass_count_BA["2008-01/2018-05"]
+testing_BA <- pass_count_BA["2018-06/"]
+```
+
+
+```{r}
+(arima_BA <- auto.arima(ts(training_BA,
+                           frequency = 12),
+                        seasonal = TRUE,
+                        lambda = "auto"))
+```
+
+```{r}
+plot(forecast(arima_BA,
+              h = 12),
+     include = 50)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
