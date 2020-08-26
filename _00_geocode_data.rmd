@@ -1,6 +1,6 @@
 ---
-title: "Group Project Exploratory Code"
-author: "Kelley Monzella"
+title: "Group Project Geocoding"
+author: "Team 5 - LJ, JK, KM, JS"
 date: "7/17/2020"
 output: html_document
 ---
@@ -134,8 +134,7 @@ print(tablist(df, in_flights, usg_in_iata, fg_in_iata))
 # check mismerges
 c <- df %>%
        filter(is.na(usg_in_iata)| is.na(fg_in_iata))
-
-# talk with team. for now, drop 5% with any missing data
+# minimal missingness. drop missing cases.
 df2 <- df %>%
          filter(!is.na(usg_in_iata) & !is.na(fg_in_iata) & 
                 usg_airport!="N/A"  & fg_airport!="N/A") 
@@ -148,10 +147,8 @@ write.csv(df2, "_01_International_Report_Passengers.csv")
 ### Step 3. Generate full list of any airport
 ```{r step3}
 # split into two datasets
-# df2_usg <- df2 %>% select(cnam, starts_with("usg")) %>% select(-(starts_with("fg")))
-# df2_fg  <- df2 %>% select(cnam, starts_with("fg"))  %>% select(-(starts_with("usg")))
 
-df2_usg <- df2 %>% select(starts_with("usg")) %>% select(-(c("usg_wac", "usg_apt_id")))  # for some values, these differ. not sure why. look into it!
+df2_usg <- df2 %>% select(starts_with("usg")) %>% select(-(c("usg_wac", "usg_apt_id")))  
 df2_fg  <- df2 %>% select(starts_with("fg"))  %>% select(-(c("fg_wac", "fg_apt_id")))
 
 # make sure column number is the same
@@ -172,10 +169,10 @@ df3 <- airports %>%
          mutate(row = n()) %>%
          ungroup()
 
-print(tablist(df3, row)) # note that there are still a dozen duplicates if you dont include icao above
+print(tablist(df3, row))
 ```
 
-### Step 4. Graph some things
+### Step 4. Graphs
 ```{r step4}
 
 # Plot a map of the united states:
@@ -183,7 +180,7 @@ map("world", col="grey20", fill=TRUE, bg="black", lwd=0.1)
 
 # Using airports data: Add a point on the map for each airport:
 points(x=df3$longitude_decimal_degrees, y=airports$latitude_decimal_degrees, pch=19,
-cex=airports$Visits/80, col="orange") # might want to limit just to major airports!
+cex=airports$Visits/80, col="orange") 
 
 # color palette for edges so that we can eventually apply a different weight
 col.1 <-adjustcolor("orange red", alpha=0.4)
